@@ -5,7 +5,7 @@
 ## What v0.2.0 supports
 
 - listing states and backend feature coverage,
-- discovering plenary session/protocol links with a harmonized schema (including `legislative_period` when inferable),
+- discovering plenary session/protocol links with a harmonized schema,
 - downloading protocol files,
 - extracting text from PDF/HTML protocols,
 - provenance fields (`source_url`, `backend`, `scraped_at`) on outputs,
@@ -39,7 +39,7 @@ txt <- extract_protocol_text(files$file_path[[1]])
 
 ## Notes on heterogeneity
 
-State systems differ strongly in structure and data depth. The backends now explicitly include archive/older-period seed pages (e.g. multiple Gesetzgebungsperioden for Steiermark) rather than scraping only the most recent page. `landtageAT` standardizes the user-facing interface, but does not pretend every state exposes the same level of detail. Member-level and speech-level extraction remain planned extension points and are explicitly marked as such.
+State systems differ strongly in structure and data depth. `landtageAT` standardizes the user-facing interface, but does not pretend every state exposes the same level of detail. Member-level and speech-level extraction remain planned extension points and are explicitly marked as such.
 
 ## Official discovery entry points used
 
