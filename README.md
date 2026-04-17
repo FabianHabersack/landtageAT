@@ -11,6 +11,13 @@
 - provenance fields (`source_url`, `backend`, `scraped_at`) on outputs,
 - graceful degradation when a state endpoint is unavailable (e.g., temporary 503).
 
+## Installation
+
+```r
+install.packages("remotes")
+remotes::install_github("FabianHabersack/landtageAT")
+```
+
 ## Quick start
 
 ```r

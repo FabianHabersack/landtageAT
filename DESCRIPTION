@@ -30,5 +30,5 @@ Suggests:
     pdftools,
     testthat (>= 3.0.0)
 Config/testthat/edition: 3
-URL: https://github.com/example/landtageAT
-BugReports: https://github.com/example/landtageAT/issues
+URL: https://github.com/FabianHabersack/landtageAT
+BugReports: https://github.com/FabianHabersack/landtageAT/issues
