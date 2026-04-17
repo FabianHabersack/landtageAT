@@ -39,3 +39,12 @@ test_that("infer_legislative_period parses common forms", {
   expect_equal(out[[3]], "XVIII")
   expect_equal(out[[4]], "XXX")
 })
+
+test_that("normalize_legislative_period converts roman to arabic", {
+  x <- c("XXIII", "XVIII", "19", NA)
+  out <- landtageAT:::normalize_legislative_period(x)
+  expect_equal(out[[1]], "23")
+  expect_equal(out[[2]], "18")
+  expect_equal(out[[3]], "19")
+  expect_true(is.na(out[[4]]))
+})

@@ -5,7 +5,7 @@
 ## What v0.2.0 supports
 
 - listing states and backend feature coverage,
-- discovering plenary session/protocol links with a harmonized schema,
+- discovering plenary session/protocol links with a harmonized schema (including `legislative_period` when inferable (normalized to arabic numerals)),
 - downloading protocol files,
 - extracting text from PDF/HTML protocols,
 - provenance fields (`source_url`, `backend`, `scraped_at`) on outputs,

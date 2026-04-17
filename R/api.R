@@ -15,18 +15,31 @@ landtage_supported_features <- function() {
 }
 
 collect_state_protocols <- function(state_code, crawl_depth = NULL) {
+  custom <- switch(
+    state_code,
+    bgld = collect_bgld_protocols(),
+    stm = collect_stm_protocols(),
+    wie = collect_wie_protocols(),
+    vbg = collect_vbg_protocols(),
+    tir = collect_tir_protocols(),
+    ooe = collect_ooe_protocols(),
+    sbg = collect_sbg_protocols(),
+    NULL
+  )
+
+  if (!is.null(custom)) {
+    return(
+      custom |>
+        dplyr::mutate(legislative_period = normalize_legislative_period(.data$legislative_period)) |>
+        dplyr::distinct(.data$protocol_url, .keep_all = TRUE)
+    )
+  }
+
   cfg <- state_backend(state_code)
   urls <- state_entry_urls(state_code)
   if (is.null(crawl_depth)) crawl_depth <- cfg$crawl_depth_default[[1]]
 
   out <- purrr::map_dfr(urls, function(url) {
-    if (state_code == "wie") {
-      links <- crawl_for_pdfs(url, max_depth = crawl_depth)
-      filtered <- filter_links_for_state(links, cfg$include_pattern[[1]], cfg$exclude_pattern[[1]])
-      return(links_to_protocols(filtered, state = state_code, source_url = url, backend = "crawler") |>
-        dplyr::mutate(legislative_period = dplyr::coalesce(.data$legislative_period, source_period_hint(state_code, url))))
-    }
-
     seed_links <- extract_links(safe_fetch_html(url), url)
     if (nrow(seed_links) == 0) {
       return(tibble::tibble(
@@ -67,6 +80,7 @@ collect_state_protocols <- function(state_code, crawl_depth = NULL) {
 
   out |>
     dplyr::filter(!is.na(.data$protocol_url), .data$protocol_url != "") |>
+    dplyr::mutate(legislative_period = normalize_legislative_period(.data$legislative_period)) |>
     dplyr::distinct(.data$protocol_url, .keep_all = TRUE)
 }
 

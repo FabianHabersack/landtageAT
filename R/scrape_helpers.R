@@ -59,6 +59,24 @@ infer_legislative_period <- function(x) {
   toupper(out)
 }
 
+
+normalize_legislative_period <- function(x) {
+  if (length(x) == 0) return(character())
+  clean <- stringr::str_squish(toupper(as.character(x)))
+  clean[clean %in% c("", "NA", "N/A")] <- NA_character_
+
+  out <- clean
+  is_roman <- !is.na(clean) & stringr::str_detect(clean, "^[IVXLCDM]+$")
+  if (any(is_roman)) {
+    out[is_roman] <- as.character(suppressWarnings(as.numeric(as.roman(clean[is_roman]))))
+  }
+
+  # keep arabic as-is
+  is_num <- !is.na(clean) & stringr::str_detect(clean, "^\\d+$")
+  out[is_num] <- clean[is_num]
+  out
+}
+
 infer_date <- function(x) {
   y <- stringr::str_extract(x, "\\d{4}-\\d{2}-\\d{2}|\\d{2}\\.\\d{2}\\.\\d{4}|\\d{1,2}\\.\\d{1,2}\\.\\d{4}")
   y <- dplyr::case_when(
@@ -144,7 +162,7 @@ links_to_protocols <- function(links, state, source_url, backend = "html") {
       session_id = .data$session_id,
       session_date = .data$session_date,
       title = .data$title,
-      legislative_period = .data$legislative_period,
+      legislative_period = normalize_legislative_period(.data$legislative_period),
       protocol_url = .data$url,
       document_type = .data$document_type,
       source_url = source_url,
