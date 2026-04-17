@@ -1,0 +1,34 @@
+Package: landtageAT
+Title: Unified Access to Austrian State Parliament Data
+Version: 0.2.0
+Author: Fabian Habersack [aut, cre]
+Maintainer: Fabian Habersack <fabian.habersack@gmail.com>
+Authors@R: c(
+    person(given = "Fabian", family = "Habersack", role = c("aut", "cre"), email = "fabian.habersack@gmail.com")
+  )
+Description: Harmonized interface to discover parliamentary sessions and plenary
+    protocols from Austria's nine state parliaments (Landtage), download source
+    documents, and extract text where feasible. Uses state-specific backend
+    adapters that prefer official structured sources when available and fall
+    back to resilient HTML/PDF discovery with provenance metadata.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
+Depends:
+    R (>= 4.1.0)
+Imports:
+    cli,
+    dplyr,
+    httr2,
+    purrr,
+    rvest,
+    stringr,
+    tibble,
+    xml2
+Suggests:
+    pdftools,
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
+URL: https://github.com/example/landtageAT
+BugReports: https://github.com/example/landtageAT/issues
