@@ -30,3 +30,12 @@ test_that("filtering keeps relevant links and removes excluded", {
   expect_equal(nrow(out), 1)
   expect_equal(out$url[[1]], "https://x.at/p.pdf")
 })
+
+test_that("infer_legislative_period parses common forms", {
+  x <- c("xxiii-gp-protokolle", "19. Gesetzgebungsperiode", "/sitzungen/XVIII", "XXX. Landtagsperiode")
+  out <- landtageAT:::infer_legislative_period(x)
+  expect_equal(out[[1]], "XXIII")
+  expect_equal(out[[2]], "19")
+  expect_equal(out[[3]], "XVIII")
+  expect_equal(out[[4]], "XXX")
+})

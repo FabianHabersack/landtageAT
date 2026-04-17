@@ -37,6 +37,28 @@ extract_links <- function(doc, base_url, pattern = NULL) {
   dplyr::distinct(out, .data$url, .keep_all = TRUE)
 }
 
+infer_legislative_period <- function(x) {
+  txt <- tolower(x)
+
+  gp_roman_prefix <- stringr::str_extract(txt, "(?:gp[-_ ]?|gesetzgebungsperiode[-_ ]?)([xivlcdm]{1,8})")
+  gp_roman_prefix <- stringr::str_replace(gp_roman_prefix, "(?:gp[-_ ]?|gesetzgebungsperiode[-_ ]?)", "")
+
+  gp_roman_suffix <- stringr::str_extract(txt, "([xivlcdm]{1,8})[-_ ]?gp")
+  gp_roman_suffix <- stringr::str_replace(gp_roman_suffix, "[-_ ]?gp", "")
+
+  gp_arabic <- stringr::str_extract(txt, "\\b\\d{1,2}\\.?\\s*gesetzgebungsperiode")
+  gp_arabic <- stringr::str_extract(gp_arabic, "\\d{1,2}")
+
+  slash_roman <- stringr::str_extract(txt, "/sitzungen/([xivlcdm]{1,8})")
+  slash_roman <- stringr::str_replace(slash_roman, "/sitzungen/", "")
+
+  lt_roman <- stringr::str_extract(txt, "([xivlcdm]{1,8})\\.?\\s*landtagsperiode")
+  lt_roman <- stringr::str_extract(lt_roman, "[xivlcdm]{1,8}")
+
+  out <- dplyr::coalesce(gp_roman_prefix, gp_roman_suffix, gp_arabic, slash_roman, lt_roman)
+  toupper(out)
+}
+
 infer_date <- function(x) {
   y <- stringr::str_extract(x, "\\d{4}-\\d{2}-\\d{2}|\\d{2}\\.\\d{2}\\.\\d{4}|\\d{1,2}\\.\\d{1,2}\\.\\d{4}")
   y <- dplyr::case_when(
@@ -91,6 +113,7 @@ links_to_protocols <- function(links, state, source_url, backend = "html") {
       session_id = character(),
       session_date = as.Date(character()),
       title = character(),
+      legislative_period = character(),
       protocol_url = character(),
       document_type = character(),
       source_url = character(),
@@ -102,6 +125,7 @@ links_to_protocols <- function(links, state, source_url, backend = "html") {
   links |>
     dplyr::mutate(
       session_date = infer_date(paste(.data$text, .data$url)),
+      legislative_period = infer_legislative_period(paste(.data$text, .data$url, source_url)),
       title = dplyr::if_else(.data$text == "", basename(.data$url), .data$text),
       document_type = dplyr::case_when(
         stringr::str_detect(tolower(.data$url), "\\.pdf($|\\?)") ~ "pdf",
@@ -120,6 +144,7 @@ links_to_protocols <- function(links, state, source_url, backend = "html") {
       session_id = .data$session_id,
       session_date = .data$session_date,
       title = .data$title,
+      legislative_period = .data$legislative_period,
       protocol_url = .data$url,
       document_type = .data$document_type,
       source_url = source_url,

@@ -23,7 +23,8 @@ collect_state_protocols <- function(state_code, crawl_depth = NULL) {
     if (state_code == "wie") {
       links <- crawl_for_pdfs(url, max_depth = crawl_depth)
       filtered <- filter_links_for_state(links, cfg$include_pattern[[1]], cfg$exclude_pattern[[1]])
-      return(links_to_protocols(filtered, state = state_code, source_url = url, backend = "crawler"))
+      return(links_to_protocols(filtered, state = state_code, source_url = url, backend = "crawler") |>
+        dplyr::mutate(legislative_period = dplyr::coalesce(.data$legislative_period, source_period_hint(state_code, url))))
     }
 
     seed_links <- extract_links(safe_fetch_html(url), url)
@@ -34,6 +35,7 @@ collect_state_protocols <- function(state_code, crawl_depth = NULL) {
         session_id = NA_character_,
         session_date = as.Date(NA),
         title = NA_character_,
+        legislative_period = source_period_hint(state_code, url),
         protocol_url = NA_character_,
         document_type = NA_character_,
         source_url = url,
@@ -59,7 +61,8 @@ collect_state_protocols <- function(state_code, crawl_depth = NULL) {
         dplyr::distinct(.data$url, .keep_all = TRUE)
     }
 
-    links_to_protocols(links, state = state_code, source_url = url, backend = "html")
+    links_to_protocols(links, state = state_code, source_url = url, backend = "html") |>
+      dplyr::mutate(legislative_period = dplyr::coalesce(.data$legislative_period, source_period_hint(state_code, url)))
   })
 
   out |>
@@ -85,6 +88,7 @@ list_sessions <- function(state, limit = NULL, crawl_depth = NULL) {
       session_id = .data$session_id,
       session_date = .data$session_date,
       title = .data$title,
+      legislative_period = .data$legislative_period,
       source_url = .data$source_url,
       backend = .data$backend,
       scraped_at = .data$scraped_at
