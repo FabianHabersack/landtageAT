@@ -24,6 +24,7 @@ extract_links <- function(doc, base_url, pattern = NULL) {
     href = rvest::html_attr(href_nodes, "href")
   ) |>
     dplyr::filter(!is.na(.data$href), .data$href != "") |>
+    dplyr::filter(!stringr::str_detect(tolower(.data$href), "^(javascript:|mailto:|tel:|data:|#)")) |>
     dplyr::mutate(
       url = xml2::url_absolute(.data$href, base = base_url),
       text = stringr::str_squish(.data$text)
@@ -123,6 +124,19 @@ follow_relevant_links <- function(seed_links, include_pattern, exclude_pattern =
   dplyr::distinct(discovered, .data$url, .keep_all = TRUE)
 }
 
+
+safe_url_basename <- function(url) {
+  if (is.na(url) || url == "") return(NA_character_)
+  clean <- strsplit(url, "?", fixed = TRUE)[[1]][1]
+  out <- suppressWarnings(tryCatch(basename(clean), error = function(e) NA_character_))
+  if (is.na(out) || out == "" || nchar(out) > 180) {
+    short <- substr(gsub("[^A-Za-z0-9]+", "_", clean), 1, 80)
+    if (short == "") short <- "document"
+    out <- short
+  }
+  out
+}
+
 links_to_protocols <- function(links, state, source_url, backend = "html") {
   if (nrow(links) == 0) {
     return(tibble::tibble(
@@ -144,7 +158,7 @@ links_to_protocols <- function(links, state, source_url, backend = "html") {
     dplyr::mutate(
       session_date = infer_date(paste(.data$text, .data$url)),
       legislative_period = infer_legislative_period(paste(.data$text, .data$url, source_url)),
-      title = dplyr::if_else(.data$text == "", basename(.data$url), .data$text),
+      title = dplyr::if_else(.data$text == "", vapply(.data$url, safe_url_basename, FUN.VALUE = character(1)), .data$text),
       document_type = dplyr::case_when(
         stringr::str_detect(tolower(.data$url), "\\.pdf($|\\?)") ~ "pdf",
         stringr::str_detect(tolower(.data$url), "\\.docx?($|\\?)") ~ "doc",

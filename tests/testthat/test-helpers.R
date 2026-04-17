@@ -48,3 +48,17 @@ test_that("normalize_legislative_period converts roman to arabic", {
   expect_equal(out[[3]], "19")
   expect_true(is.na(out[[4]]))
 })
+
+test_that("extract_links drops data and javascript hrefs", {
+  html <- xml2::read_html('<html><body><a href="data:image/png;base64,AAA">icon</a><a href="javascript:void(0)">js</a><a href="/ok.pdf">ok</a></body></html>')
+  links <- landtageAT:::extract_links(html, "https://example.org/base")
+  expect_equal(nrow(links), 1)
+  expect_true(grepl("ok\\.pdf$", links$url[[1]]))
+})
+
+test_that("links_to_protocols handles long URLs without basename errors", {
+  long <- paste0("https://example.org/", paste(rep("a", 5000), collapse = ""), ".pdf")
+  links <- tibble::tibble(text = "", href = long, url = long)
+  expect_no_error(tbl <- landtageAT:::links_to_protocols(links, state = "ktn", source_url = "https://example.org"))
+  expect_true(nchar(tbl$title[[1]]) > 0)
+})
