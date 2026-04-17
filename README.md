@@ -1,5 +1,7 @@
 # landtageAT
 
+<img src="man/figures/landtageAT.png" align="right" height="180" alt="landtageAT logo" />
+
 `landtageAT` provides a unified R interface to parliamentary data from Austria's nine state parliaments (Landtage), while using state-specific backend logic under the hood.
 
 ## What v0.2.0 supports
