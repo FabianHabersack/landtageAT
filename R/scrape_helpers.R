@@ -51,18 +51,8 @@ fetch_landtag_elections <- function(force_refresh = FALSE) {
     return(.election_cache$data)
   }
 
-  req_json <- function(url, query = list()) {
-    req <- httr2::request(url) |>
-      httr2::req_user_agent("landtageAT/0.2.0") |>
-      httr2::req_timeout(30) |>
-      httr2::req_retry(max_tries = 3)
-    if (length(query) > 0) req <- httr2::req_url_query(req, !!!query)
-    httr2::req_perform(req) |>
-      httr2::resp_body_json(check_type = FALSE)
-  }
-
   basics <- tryCatch(
-    req_json("https://www.wahldatenbank.at/basics.json"),
+    jsonlite::fromJSON("https://www.wahldatenbank.at/basics.json"),
     error = function(e) NULL
   )
 
@@ -107,7 +97,7 @@ fetch_landtag_elections <- function(force_refresh = FALSE) {
     state <- candidates$state[[i]]
 
     payload <- tryCatch(
-      req_json("https://www.wahldatenbank.at/get_election.php", query = list(el = el, lvl = "Bundesland")),
+      jsonlite::fromJSON(sprintf("https://www.wahldatenbank.at/get_election.php?el=%s&lvl=Bundesland", el)),
       error = function(e) NULL
     )
 
@@ -173,7 +163,7 @@ enrich_with_elections <- function(protocols) {
         election_votes = NA_real_,
         election_valid = NA_real_,
         election_invalid = NA_real_,
-        election_party_results = purrr::map(seq_len(dplyr::n()), ~list())
+        election_party_results = purrr::map(seq_len(dplyr::n()), ~NA)
       ))
   }
 
@@ -213,7 +203,7 @@ enrich_with_elections <- function(protocols) {
         election_valid = dplyr::if_else(has_match, e$election_valid[idx_safe], NA_real_),
         election_invalid = dplyr::if_else(has_match, e$election_invalid[idx_safe], NA_real_),
         election_party_results = purrr::map(seq_len(dplyr::n()), function(i) {
-          if (!has_match[[i]]) return(list())
+          if (!has_match[[i]]) return(NA)
           e$election_party_results[[idx_safe[[i]]]]
         })
       )

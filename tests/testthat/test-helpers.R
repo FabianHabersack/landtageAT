@@ -31,6 +31,7 @@ test_that("filtering keeps relevant links and removes excluded", {
   expect_equal(out$url[[1]], "https://x.at/p.pdf")
 })
 
+
 test_that("infer_legislative_period parses common forms", {
   x <- c("xxiii-gp-protokolle", "19. Gesetzgebungsperiode", "/sitzungen/XVIII", "XXX. Landtagsperiode")
   out <- landtageAT:::infer_legislative_period(x)
@@ -40,6 +41,7 @@ test_that("infer_legislative_period parses common forms", {
   expect_equal(out[[4]], "XXX")
 })
 
+
 test_that("normalize_legislative_period converts roman to arabic", {
   x <- c("XXIII", "XVIII", "19", NA)
   out <- landtageAT:::normalize_legislative_period(x)
@@ -48,6 +50,7 @@ test_that("normalize_legislative_period converts roman to arabic", {
   expect_equal(out[[3]], "19")
   expect_true(is.na(out[[4]]))
 })
+
 
 test_that("extract_links drops data and javascript hrefs", {
   html <- xml2::read_html('<html><body><a href="data:image/png;base64,AAA">icon</a><a href="javascript:void(0)">js</a><a href="/ok.pdf">ok</a></body></html>')

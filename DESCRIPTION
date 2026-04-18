@@ -21,6 +21,7 @@ Imports:
     cli,
     dplyr,
     httr2,
+    jsonlite,
     purrr,
     rvest,
     stringr,
