@@ -258,7 +258,6 @@ infer_legislative_period <- function(x) {
   toupper(out)
 }
 
-
 normalize_legislative_period <- function(x) {
   if (length(x) == 0) return(character())
   clean <- stringr::str_squish(toupper(as.character(x)))
@@ -321,7 +320,6 @@ follow_relevant_links <- function(seed_links, include_pattern, exclude_pattern =
 
   dplyr::distinct(discovered, .data$url, .keep_all = TRUE)
 }
-
 
 safe_url_basename <- function(url) {
   if (is.na(url) || url == "") return(NA_character_)
