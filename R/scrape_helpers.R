@@ -52,24 +52,13 @@ fetch_landtag_elections <- function(force_refresh = FALSE) {
   }
 
   req_json <- function(url, query = list()) {
-    last_err <- NULL
-    for (attempt in 1:3) {
-      out <- tryCatch({
-        req <- httr2::request(url) |>
-          httr2::req_user_agent("landtageAT/0.2.0") |>
-          httr2::req_timeout(30)
-        if (length(query) > 0) req <- httr2::req_url_query(req, !!!query)
-        httr2::req_perform(req) |>
-          httr2::resp_body_json(check_type = FALSE)
-      }, error = function(e) {
-        last_err <<- e
-        NULL
-      })
-      if (!is.null(out)) return(out)
-      Sys.sleep(0.4 * attempt)
-    }
-    if (!is.null(last_err)) stop(last_err)
-    NULL
+    req <- httr2::request(url) |>
+      httr2::req_user_agent("landtageAT/0.2.0") |>
+      httr2::req_timeout(30) |>
+      httr2::req_retry(max_tries = 3)
+    if (length(query) > 0) req <- httr2::req_url_query(req, !!!query)
+    httr2::req_perform(req) |>
+      httr2::resp_body_json(check_type = FALSE)
   }
 
   basics <- tryCatch(
@@ -184,7 +173,7 @@ enrich_with_elections <- function(protocols) {
         election_votes = NA_real_,
         election_valid = NA_real_,
         election_invalid = NA_real_,
-        election_party_results = purrr::map(seq_len(dplyr::n()), ~NA)
+        election_party_results = purrr::map(seq_len(dplyr::n()), ~list())
       ))
   }
 
@@ -224,7 +213,7 @@ enrich_with_elections <- function(protocols) {
         election_valid = dplyr::if_else(has_match, e$election_valid[idx_safe], NA_real_),
         election_invalid = dplyr::if_else(has_match, e$election_invalid[idx_safe], NA_real_),
         election_party_results = purrr::map(seq_len(dplyr::n()), function(i) {
-          if (!has_match[[i]]) return(NA)
+          if (!has_match[[i]]) return(list())
           e$election_party_results[[idx_safe[[i]]]]
         })
       )
@@ -278,7 +267,6 @@ infer_legislative_period <- function(x) {
   out <- dplyr::coalesce(gp_roman_prefix, gp_roman_suffix, gp_arabic, slash_roman, lt_roman)
   toupper(out)
 }
-
 
 normalize_legislative_period <- function(x) {
   if (length(x) == 0) return(character())
@@ -342,7 +330,6 @@ follow_relevant_links <- function(seed_links, include_pattern, exclude_pattern =
 
   dplyr::distinct(discovered, .data$url, .keep_all = TRUE)
 }
-
 
 safe_url_basename <- function(url) {
   if (is.na(url) || url == "") return(NA_character_)
