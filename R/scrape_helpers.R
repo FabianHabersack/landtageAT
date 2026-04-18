@@ -51,7 +51,7 @@ fetch_landtag_elections <- function(force_refresh = FALSE) {
 
   basics <- httr2::request("https://www.wahldatenbank.at/basics.json") |>
     httr2::req_user_agent("landtageAT/0.2.0") |>
-    httr2::req_timeout(30) |>
+    httr2::req_timeout(10) |>
     httr2::req_perform() |>
     httr2::resp_body_json(check_type = FALSE)
 
@@ -83,7 +83,7 @@ fetch_landtag_elections <- function(force_refresh = FALSE) {
     payload <- tryCatch(
       httr2::request("https://www.wahldatenbank.at/get_election.php") |>
         httr2::req_user_agent("landtageAT/0.2.0") |>
-        httr2::req_timeout(30) |>
+        httr2::req_timeout(10) |>
         httr2::req_url_query(el = el, lvl = "Bundesland") |>
         httr2::req_perform() |>
         httr2::resp_body_json(check_type = FALSE),
