@@ -51,7 +51,7 @@ fetch_landtag_elections <- function(force_refresh = FALSE) {
 
   basics <- httr2::request("https://www.wahldatenbank.at/basics.json") |>
     httr2::req_user_agent("landtageAT/0.2.0") |>
-    httr2::req_timeout(10) |>
+    httr2::req_timeout(30) |>
     httr2::req_perform() |>
     httr2::resp_body_json(check_type = FALSE)
 
@@ -60,20 +60,33 @@ fetch_landtag_elections <- function(force_refresh = FALSE) {
   names_vec <- vapply(wahlen, function(x) null_or(x$name, NA_character_), FUN.VALUE = character(1))
   levels_vec <- vapply(wahlen, function(x) paste(null_or(x$levels, character()), collapse = ","), FUN.VALUE = character(1))
 
+  id_to_state <- function(election_id) {
+    code <- stringr::str_match(election_id, "^ltw([a-z]+)\\d{4}$")[, 2]
+    dplyr::recode(
+      code,
+      "bgld" = "bgld",
+      "ktn" = "ktn",
+      "noe" = "noe",
+      "ooe" = "ooe",
+      "sbg" = "sbg",
+      "stmk" = "stm",
+      "tir" = "tir",
+      "vbg" = "vbg",
+      "wie" = "wie",
+      .default = NA_character_
+    )
+  }
+
   candidates <- tibble::tibble(
     election_id = ids,
     election_name = names_vec,
     levels = levels_vec
   ) |>
     dplyr::filter(
-      stringr::str_detect(.data$election_name, "^Landtagswahl\\s+"),
+      stringr::str_detect(.data$election_id, "^ltw[a-z]+\\d{4}$"),
       stringr::str_detect(.data$levels, "Bundesland")
     ) |>
-    dplyr::mutate(
-      state_name = stringr::str_trim(stringr::str_remove(.data$election_name, "^Landtagswahl\\s+")),
-      state_name = stringr::str_trim(stringr::str_remove(.data$state_name, "\\s+\\d{4}$")),
-      state = election_state_map(.data$state_name)
-    ) |>
+    dplyr::mutate(state = id_to_state(.data$election_id)) |>
     dplyr::filter(!is.na(.data$state))
 
   out <- purrr::map_dfr(seq_len(nrow(candidates)), function(i) {
@@ -83,7 +96,7 @@ fetch_landtag_elections <- function(force_refresh = FALSE) {
     payload <- tryCatch(
       httr2::request("https://www.wahldatenbank.at/get_election.php") |>
         httr2::req_user_agent("landtageAT/0.2.0") |>
-        httr2::req_timeout(10) |>
+        httr2::req_timeout(30) |>
         httr2::req_url_query(el = el, lvl = "Bundesland") |>
         httr2::req_perform() |>
         httr2::resp_body_json(check_type = FALSE),
@@ -112,7 +125,14 @@ fetch_landtag_elections <- function(force_refresh = FALSE) {
       election_invalid = as.numeric(null_or(row$invalid, NA_real_)),
       election_party_results = list(party_votes)
     )
-  }) |>
+  })
+
+  if (nrow(out) == 0) {
+    .election_cache$data <- tibble::tibble()
+    return(.election_cache$data)
+  }
+
+  out <- out |>
     dplyr::arrange(.data$state, .data$election_date) |>
     dplyr::group_by(.data$state) |>
     dplyr::mutate(legislative_period = as.character(dplyr::row_number())) |>
