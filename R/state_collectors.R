@@ -95,13 +95,74 @@ collect_wie_protocols <- function() {
   })
 }
 
-collect_vbg_protocols <- function() {
-  url <- "https://vorarlberg.at/web/landtag/-/sitzungen-der-xxx.-landtagsperiode"
-  doc <- safe_fetch_html(url)
-  if (is.null(doc)) return(links_to_protocols(empty_links_tbl(), "vbg", url, backend = "vbg"))
-  links <- extract_links(doc, url) |>
-    dplyr::filter(stringr::str_detect(tolower(.data$url), "\\.pdf($|\\?)"))
-  links_to_protocols(links, state = "vbg", source_url = url, backend = "vbg")
+vbg_extract_pdf_url <- function(document_url) {
+  txt <- tryCatch(
+      httr2::request(document_url) |>
+      httr2::req_user_agent("landtageAT/0.2.0") |>
+      httr2::req_timeout(10) |>
+      httr2::req_perform() |>
+      httr2::resp_body_string(),
+    error = function(e) ""
+  )
+
+  if (txt == "") return(NA_character_)
+
+  m1 <- stringr::str_match(txt, 'OpenPDF\\("([^"]+)"\\)')[, 2]
+  m2 <- stringr::str_match(txt, 'iframe[^>]+src="([^"]+\\.pdf[^"]*)"')[, 2]
+  out <- dplyr::coalesce(m1, m2)
+  if (is.na(out)) return(NA_character_)
+  xml2::url_absolute(out, document_url)
+}
+
+collect_vbg_protocols <- function(max_pages = 250, max_results = NULL) {
+  base <- "https://suche.vorarlberg.at/VLR/vlr_gov.nsf/alldocs_byDateDSC?SearchView"
+  query <- 'FIELD fd_TypeOfDocumentTX Contains "Protokoll"'
+  count <- 100L
+
+  out <- tibble::tibble()
+
+  for (page in seq_len(max_pages)) {
+    start <- (page - 1L) * count + 1L
+    url <- paste0(
+      base,
+      "&SearchMax=0",
+      "&Count=", count,
+      "&Start=", start,
+      "&SearchWV=FALSE",
+      "&SearchFuzzy=FALSE",
+      "&SearchOrder=4",
+      "&Query=", utils::URLencode(query, reserved = TRUE)
+    )
+
+    doc <- safe_fetch_html(url)
+    links <- extract_links(doc, url) |>
+      dplyr::filter(stringr::str_detect(tolower(.data$url), "opendocument"))
+
+    if (nrow(links) == 0) break
+
+    if (!is.null(max_results)) {
+      remaining <- max_results - nrow(out)
+      if (remaining <= 0) break
+      links <- dplyr::slice_head(links, n = remaining)
+    }
+
+    page_tbl <- links_to_protocols(links, state = "vbg", source_url = url, backend = "vbg-lis") |>
+      dplyr::mutate(
+        source_document_url = .data$protocol_url,
+        protocol_url = vapply(.data$protocol_url, vbg_extract_pdf_url, FUN.VALUE = character(1)),
+        protocol_url = dplyr::if_else(is.na(.data$protocol_url) | .data$protocol_url == "", .data$source_document_url, .data$protocol_url),
+        document_type = dplyr::if_else(stringr::str_detect(tolower(.data$protocol_url), "\\.pdf"), "pdf", "html")
+      ) |>
+      dplyr::select(-"source_document_url")
+
+    out <- dplyr::bind_rows(out, page_tbl)
+
+    if (!is.null(max_results) && nrow(out) >= max_results) break
+
+    if (nrow(links) < count) break
+  }
+
+  dplyr::distinct(out, .data$protocol_url, .keep_all = TRUE)
 }
 
 collect_tir_protocols <- function() {

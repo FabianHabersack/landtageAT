@@ -51,5 +51,5 @@ State systems differ strongly in structure and data scope. `landtageAT` standard
 - Salzburg: https://www.salzburg.gv.at/pol/landtag/parlamentarische-materialien
 - Steiermark: https://www.landtag.steiermark.at/cms/ziel/181952035
 - Tirol: https://www.tirol.gv.at/landtag
-- Vorarlberg: https://vorarlberg.at/web/landtag/-/protokolle
+- Vorarlberg: https://vorarlberg.at/web/landtag/lis
 - Wien: https://www.wien.gv.at/mdb/ltg

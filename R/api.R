@@ -14,13 +14,13 @@ landtage_supported_features <- function() {
   dplyr::left_join(.state_catalog, .backend_feature_matrix, by = "state")
 }
 
-collect_state_protocols <- function(state_code, crawl_depth = NULL) {
+collect_state_protocols <- function(state_code, crawl_depth = NULL, limit = NULL) {
   custom <- switch(
     state_code,
     bgld = collect_bgld_protocols(),
     stm = collect_stm_protocols(),
     wie = collect_wie_protocols(),
-    vbg = collect_vbg_protocols(),
+    vbg = collect_vbg_protocols(max_results = limit),
     tir = collect_tir_protocols(),
     ooe = collect_ooe_protocols(),
     sbg = collect_sbg_protocols(),
@@ -93,7 +93,7 @@ collect_state_protocols <- function(state_code, crawl_depth = NULL) {
 #' @export
 list_sessions <- function(state, limit = NULL, crawl_depth = NULL) {
   state_code <- normalize_state(state)
-  protocols <- collect_state_protocols(state_code, crawl_depth = crawl_depth)
+  protocols <- collect_state_protocols(state_code, crawl_depth = crawl_depth, limit = limit)
 
   sessions <- protocols |>
     dplyr::transmute(
@@ -123,7 +123,7 @@ list_sessions <- function(state, limit = NULL, crawl_depth = NULL) {
 #' @export
 list_protocols <- function(state, limit = NULL, crawl_depth = NULL) {
   state_code <- normalize_state(state)
-  protocols <- collect_state_protocols(state_code, crawl_depth = crawl_depth) |>
+  protocols <- collect_state_protocols(state_code, crawl_depth = crawl_depth, limit = limit) |>
     dplyr::arrange(dplyr::desc(.data$session_date), .data$title)
 
   if (!is.null(limit)) protocols <- dplyr::slice_head(protocols, n = limit)
