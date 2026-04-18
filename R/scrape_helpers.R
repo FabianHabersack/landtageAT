@@ -47,7 +47,9 @@ election_state_map <- function(x) {
 .election_cache <- new.env(parent = emptyenv())
 
 fetch_landtag_elections <- function(force_refresh = FALSE) {
-  if (!force_refresh && !is.null(.election_cache$data)) return(.election_cache$data)
+  if (!force_refresh && !is.null(.election_cache$data) && nrow(.election_cache$data) > 0) {
+    return(.election_cache$data)
+  }
 
   basics <- httr2::request("https://www.wahldatenbank.at/basics.json") |>
     httr2::req_user_agent("landtageAT/0.2.0") |>
@@ -127,10 +129,7 @@ fetch_landtag_elections <- function(force_refresh = FALSE) {
     )
   })
 
-  if (nrow(out) == 0) {
-    .election_cache$data <- tibble::tibble()
-    return(.election_cache$data)
-  }
+  if (nrow(out) == 0) return(tibble::tibble())
 
   out <- out |>
     dplyr::arrange(.data$state, .data$election_date) |>
@@ -146,7 +145,19 @@ enrich_with_elections <- function(protocols) {
   if (nrow(protocols) == 0) return(protocols)
 
   elections <- fetch_landtag_elections()
-  if (nrow(elections) == 0) return(protocols)
+  if (nrow(elections) == 0) {
+    return(protocols |>
+      dplyr::mutate(
+        election_id = NA_character_,
+        election_name = NA_character_,
+        election_date = as.Date(NA),
+        election_eligible = NA_real_,
+        election_votes = NA_real_,
+        election_valid = NA_real_,
+        election_invalid = NA_real_,
+        election_party_results = purrr::map(seq_len(dplyr::n()), ~list())
+      ))
+  }
 
   split_protocols <- split(protocols, protocols$state)
   enriched <- purrr::map_dfr(split_protocols, function(df_state) {

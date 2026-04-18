@@ -14,6 +14,19 @@ landtage_supported_features <- function() {
   dplyr::left_join(.state_catalog, .backend_feature_matrix, by = "state")
 }
 
+#' List state election metadata used for legislative-period assignment
+#'
+#' @param state Optional state code or name to filter election records.
+#' @param force_refresh Whether to force a fresh fetch from wahldatenbank.at.
+#' @return Tibble with election dates, turnout totals and party vote results.
+#' @export
+list_state_elections <- function(state = NULL, force_refresh = FALSE) {
+  out <- fetch_landtag_elections(force_refresh = force_refresh)
+  if (is.null(state)) return(out)
+  state_code <- normalize_state(state)
+  dplyr::filter(out, .data$state == state_code)
+}
+
 collect_state_protocols <- function(state_code, crawl_depth = NULL, limit = NULL) {
   custom <- switch(
     state_code,
