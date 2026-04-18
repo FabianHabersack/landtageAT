@@ -51,11 +51,22 @@ fetch_landtag_elections <- function(force_refresh = FALSE) {
     return(.election_cache$data)
   }
 
-  basics <- httr2::request("https://www.wahldatenbank.at/basics.json") |>
-    httr2::req_user_agent("landtageAT/0.2.0") |>
-    httr2::req_timeout(30) |>
-    httr2::req_perform() |>
-    httr2::resp_body_json(check_type = FALSE)
+  req_json <- function(url, query = list()) {
+    req <- httr2::request(url) |>
+      httr2::req_user_agent("landtageAT/0.2.0") |>
+      httr2::req_timeout(30) |>
+      httr2::req_retry(max_tries = 3)
+    if (length(query) > 0) req <- httr2::req_url_query(req, !!!query)
+    httr2::req_perform(req) |>
+      httr2::resp_body_json(check_type = FALSE)
+  }
+
+  basics <- tryCatch(
+    req_json("https://www.wahldatenbank.at/basics.json"),
+    error = function(e) NULL
+  )
+
+  if (is.null(basics) || is.null(basics$wahlen)) return(tibble::tibble())
 
   wahlen <- basics$wahlen
   ids <- names(wahlen)
@@ -96,12 +107,7 @@ fetch_landtag_elections <- function(force_refresh = FALSE) {
     state <- candidates$state[[i]]
 
     payload <- tryCatch(
-      httr2::request("https://www.wahldatenbank.at/get_election.php") |>
-        httr2::req_user_agent("landtageAT/0.2.0") |>
-        httr2::req_timeout(30) |>
-        httr2::req_url_query(el = el, lvl = "Bundesland") |>
-        httr2::req_perform() |>
-        httr2::resp_body_json(check_type = FALSE),
+      req_json("https://www.wahldatenbank.at/get_election.php", query = list(el = el, lvl = "Bundesland")),
       error = function(e) NULL
     )
 
@@ -142,7 +148,19 @@ fetch_landtag_elections <- function(force_refresh = FALSE) {
 }
 
 enrich_with_elections <- function(protocols) {
-  if (nrow(protocols) == 0) return(protocols)
+  if (nrow(protocols) == 0) {
+    return(protocols |>
+      dplyr::mutate(
+        election_id = character(),
+        election_name = character(),
+        election_date = as.Date(character()),
+        election_eligible = numeric(),
+        election_votes = numeric(),
+        election_valid = numeric(),
+        election_invalid = numeric(),
+        election_party_results = list()
+      ))
+  }
 
   elections <- fetch_landtag_elections()
   if (nrow(elections) == 0) {
@@ -250,7 +268,6 @@ infer_legislative_period <- function(x) {
   toupper(out)
 }
 
-
 normalize_legislative_period <- function(x) {
   if (length(x) == 0) return(character())
   clean <- stringr::str_squish(toupper(as.character(x)))
@@ -313,7 +330,6 @@ follow_relevant_links <- function(seed_links, include_pattern, exclude_pattern =
 
   dplyr::distinct(discovered, .data$url, .keep_all = TRUE)
 }
-
 
 safe_url_basename <- function(url) {
   if (is.na(url) || url == "") return(NA_character_)
