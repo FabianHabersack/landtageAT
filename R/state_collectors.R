@@ -85,27 +85,27 @@ collect_wie_protocols <- function() {
     doc <- safe_fetch_html(url)
     if (is.null(doc)) return(links_to_protocols(empty_links_tbl(), "wie", url, backend = "wie"))
 
-    wp_nodes <- rvest::html_elements(
-      doc,
-      xpath = "//a[contains(translate(normalize-space(string()), 'WORTPROTOKOLL', 'wortprotokoll'), 'wortprotokoll')]"
-    )
-    if (length(wp_nodes) == 0) return(links_to_protocols(empty_links_tbl(), "wie", url, backend = "wie"))
-
-    out <- purrr::map_dfr(wp_nodes, function(node) {
-      href <- rvest::html_attr(node, "href")
-      if (is.na(href) || href == "") return(tibble::tibble())
-
-      session_node <- xml2::xml_find_first(node, "ancestor::li[strong][1]/strong[1]")
-      session_title <- stringr::str_squish(rvest::html_text2(session_node))
-      if (is.na(session_title) || session_title == "") session_title <- basename(href)
-
-      full <- xml2::url_absolute(href, url)
-      tibble::tibble(
-        text = paste0("Wortprotokoll ", session_title),
-        href = href,
-        url = full
+    links <- extract_links(doc, url) |>
+      dplyr::mutate(text_lc = tolower(.data$text), url_lc = tolower(.data$url)) |>
+      dplyr::filter(
+        stringr::str_detect(.data$url_lc, "ltg-"),
+        stringr::str_detect(.data$url_lc, "\\.(htm|html|pdf|doc)($|\\?)")
       )
-    })
+
+    wp_links <- links |>
+      dplyr::filter(stringr::str_detect(.data$text_lc, "wortprotokoll") | stringr::str_detect(.data$url_lc, "-w-"))
+
+    if (nrow(wp_links) == 0) {
+      wp_links <- links |>
+        dplyr::filter(stringr::str_detect(.data$text_lc, "sitzungsbericht") | stringr::str_detect(.data$url_lc, "-s-"))
+    }
+
+    out <- wp_links |>
+      dplyr::transmute(
+        text = dplyr::if_else(.data$text == "", basename(.data$url), .data$text),
+        href = .data$href,
+        url = .data$url
+      )
 
     links_to_protocols(out, state = "wie", source_url = url, backend = "wie") |>
       dplyr::distinct(.data$protocol_url, .keep_all = TRUE)

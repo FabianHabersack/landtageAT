@@ -7,7 +7,16 @@ fetch_html <- function(url, user_agent = "landtageAT/0.2.0") {
     httr2::req_user_agent(user_agent) |>
     httr2::req_timeout(30)
   resp <- httr2::req_perform(req)
-  xml2::read_html(httr2::resp_body_string(resp))
+  raw <- httr2::resp_body_raw(resp)
+
+  tryCatch(
+    xml2::read_html(raw),
+    error = function(e) {
+      txt <- rawToChar(raw)
+      txt_utf8 <- iconv(txt, from = "latin1", to = "UTF-8", sub = "")
+      xml2::read_html(txt_utf8)
+    }
+  )
 }
 
 safe_fetch_html <- function(url) {
