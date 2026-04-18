@@ -30,7 +30,7 @@ collect_state_protocols <- function(state_code, crawl_depth = NULL, limit = NULL
   if (!is.null(custom)) {
     return(
       custom |>
-        dplyr::mutate(legislative_period = normalize_legislative_period(.data$legislative_period)) |>
+        enrich_with_elections() |>
         dplyr::distinct(.data$protocol_url, .keep_all = TRUE)
     )
   }
@@ -80,7 +80,7 @@ collect_state_protocols <- function(state_code, crawl_depth = NULL, limit = NULL
 
   out |>
     dplyr::filter(!is.na(.data$protocol_url), .data$protocol_url != "") |>
-    dplyr::mutate(legislative_period = normalize_legislative_period(.data$legislative_period)) |>
+    enrich_with_elections() |>
     dplyr::distinct(.data$protocol_url, .keep_all = TRUE)
 }
 

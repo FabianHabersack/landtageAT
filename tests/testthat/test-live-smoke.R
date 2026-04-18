@@ -17,4 +17,6 @@ test_that("wien includes older archive years when available", {
   expect_true(any(!is.na(wie$session_date) & wie$session_date < as.Date("2010-01-01")))
   expect_true(any(stringr::str_detect(wie$title, "Sitzung vom")))
   expect_false(any(stringr::str_detect(wie$title, "KB PDF|KB DOC")))
+  expect_true(all(c("election_id", "election_name", "election_date", "election_party_results") %in% names(wie)))
+  expect_true(any(lengths(wie$election_party_results) > 0))
 })

@@ -23,6 +23,156 @@ safe_fetch_html <- function(url) {
   tryCatch(fetch_html(url), error = function(e) NULL)
 }
 
+null_or <- function(x, y) {
+  if (is.null(x) || length(x) == 0) y else x
+}
+
+election_state_map <- function(x) {
+  key <- tolower(iconv(x, from = "", to = "ASCII//TRANSLIT"))
+  dplyr::recode(
+    key,
+    "burgenland" = "bgld",
+    "karnten" = "ktn",
+    "niederosterreich" = "noe",
+    "oberosterreich" = "ooe",
+    "salzburg" = "sbg",
+    "steiermark" = "stm",
+    "tirol" = "tir",
+    "vorarlberg" = "vbg",
+    "wien" = "wie",
+    .default = NA_character_
+  )
+}
+
+.election_cache <- new.env(parent = emptyenv())
+
+fetch_landtag_elections <- function(force_refresh = FALSE) {
+  if (!force_refresh && !is.null(.election_cache$data)) return(.election_cache$data)
+
+  basics <- httr2::request("https://www.wahldatenbank.at/basics.json") |>
+    httr2::req_user_agent("landtageAT/0.2.0") |>
+    httr2::req_timeout(10) |>
+    httr2::req_perform() |>
+    httr2::resp_body_json(check_type = FALSE)
+
+  wahlen <- basics$wahlen
+  ids <- names(wahlen)
+  names_vec <- vapply(wahlen, function(x) null_or(x$name, NA_character_), FUN.VALUE = character(1))
+  levels_vec <- vapply(wahlen, function(x) paste(null_or(x$levels, character()), collapse = ","), FUN.VALUE = character(1))
+
+  candidates <- tibble::tibble(
+    election_id = ids,
+    election_name = names_vec,
+    levels = levels_vec
+  ) |>
+    dplyr::filter(
+      stringr::str_detect(.data$election_name, "^Landtagswahl\\s+"),
+      stringr::str_detect(.data$levels, "Bundesland")
+    ) |>
+    dplyr::mutate(
+      state_name = stringr::str_trim(stringr::str_remove(.data$election_name, "^Landtagswahl\\s+")),
+      state_name = stringr::str_trim(stringr::str_remove(.data$state_name, "\\s+\\d{4}$")),
+      state = election_state_map(.data$state_name)
+    ) |>
+    dplyr::filter(!is.na(.data$state))
+
+  out <- purrr::map_dfr(seq_len(nrow(candidates)), function(i) {
+    el <- candidates$election_id[[i]]
+    state <- candidates$state[[i]]
+
+    payload <- tryCatch(
+      httr2::request("https://www.wahldatenbank.at/get_election.php") |>
+        httr2::req_user_agent("landtageAT/0.2.0") |>
+        httr2::req_timeout(10) |>
+        httr2::req_url_query(el = el, lvl = "Bundesland") |>
+        httr2::req_perform() |>
+        httr2::resp_body_json(check_type = FALSE),
+      error = function(e) NULL
+    )
+
+    if (is.null(payload) || is.null(payload$data) || length(payload$data) == 0) return(tibble::tibble())
+
+    row <- if (is.data.frame(payload$data)) {
+      as.list(payload$data[1, , drop = TRUE])
+    } else {
+      payload$data[[1]]
+    }
+    parties <- strsplit(null_or(payload$parties, ""), ",", fixed = TRUE)[[1]]
+    parties <- parties[parties != ""]
+    party_votes <- stats::setNames(as.list(unname(unlist(row[parties]))), parties)
+
+    tibble::tibble(
+      state = state,
+      election_id = el,
+      election_name = null_or(payload$name, candidates$election_name[[i]]),
+      election_date = as.Date(null_or(payload$date, NA_character_)),
+      election_eligible = as.numeric(null_or(row$eligible, NA_real_)),
+      election_votes = as.numeric(null_or(row$votes, NA_real_)),
+      election_valid = as.numeric(null_or(row$valid, NA_real_)),
+      election_invalid = as.numeric(null_or(row$invalid, NA_real_)),
+      election_party_results = list(party_votes)
+    )
+  }) |>
+    dplyr::arrange(.data$state, .data$election_date) |>
+    dplyr::group_by(.data$state) |>
+    dplyr::mutate(legislative_period = as.character(dplyr::row_number())) |>
+    dplyr::ungroup()
+
+  .election_cache$data <- out
+  out
+}
+
+enrich_with_elections <- function(protocols) {
+  if (nrow(protocols) == 0) return(protocols)
+
+  elections <- fetch_landtag_elections()
+  if (nrow(elections) == 0) return(protocols)
+
+  split_protocols <- split(protocols, protocols$state)
+  enriched <- purrr::map_dfr(split_protocols, function(df_state) {
+    st <- df_state$state[[1]]
+    e <- dplyr::filter(elections, .data$state == st) |>
+      dplyr::arrange(.data$election_date)
+
+    if (nrow(e) == 0) {
+      return(df_state |>
+        dplyr::mutate(
+          legislative_period = NA_character_,
+          election_id = NA_character_,
+          election_name = NA_character_,
+          election_date = as.Date(NA),
+          election_eligible = NA_real_,
+          election_votes = NA_real_,
+          election_valid = NA_real_,
+          election_invalid = NA_real_,
+          election_party_results = vector("list", dplyr::n())
+        ))
+    }
+
+    idx <- findInterval(df_state$session_date, e$election_date)
+    has_match <- !is.na(idx) & idx > 0
+    idx_safe <- pmax(idx, 1)
+
+    df_state |>
+      dplyr::mutate(
+        legislative_period = dplyr::if_else(has_match, e$legislative_period[idx_safe], NA_character_),
+        election_id = dplyr::if_else(has_match, e$election_id[idx_safe], NA_character_),
+        election_name = dplyr::if_else(has_match, e$election_name[idx_safe], NA_character_),
+        election_date = dplyr::if_else(has_match, e$election_date[idx_safe], as.Date(NA)),
+        election_eligible = dplyr::if_else(has_match, e$election_eligible[idx_safe], NA_real_),
+        election_votes = dplyr::if_else(has_match, e$election_votes[idx_safe], NA_real_),
+        election_valid = dplyr::if_else(has_match, e$election_valid[idx_safe], NA_real_),
+        election_invalid = dplyr::if_else(has_match, e$election_invalid[idx_safe], NA_real_),
+        election_party_results = purrr::map(seq_len(dplyr::n()), function(i) {
+          if (!has_match[[i]]) return(list())
+          e$election_party_results[[idx_safe[[i]]]]
+        })
+      )
+  })
+
+  dplyr::bind_rows(enriched)
+}
+
 extract_links <- function(doc, base_url, pattern = NULL) {
   if (is.null(doc)) return(empty_links_tbl())
   href_nodes <- rvest::html_elements(doc, "a")
