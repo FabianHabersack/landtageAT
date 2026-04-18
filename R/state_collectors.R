@@ -66,23 +66,39 @@ collect_stm_protocols <- function() {
 }
 
 collect_wie_protocols <- function() {
-  years <- 1998:as.integer(format(Sys.Date(), "%Y"))
-  urls <- sprintf("https://www.wien.gv.at/mdb/ltg/%s/index.htm", years)
+  overview_url <- "https://www.wien.gv.at/mdb/ltg/"
+  overview_doc <- safe_fetch_html(overview_url)
+
+  urls <- if (!is.null(overview_doc)) {
+    extract_links(overview_doc, overview_url) |>
+      dplyr::filter(stringr::str_detect(.data$url, "/mdb/ltg/\\d{4}/?(index\\.htm)?$")) |>
+      dplyr::mutate(url = stringr::str_replace(.data$url, "/$", "/index.htm")) |>
+      dplyr::distinct(.data$url) |>
+      dplyr::arrange(dplyr::desc(.data$url)) |>
+      dplyr::pull(.data$url)
+  } else {
+    years <- 1998:as.integer(format(Sys.Date(), "%Y"))
+    sprintf("https://www.wien.gv.at/mdb/ltg/%s/index.htm", years)
+  }
 
   purrr::map_dfr(urls, function(url) {
     doc <- safe_fetch_html(url)
     if (is.null(doc)) return(links_to_protocols(empty_links_tbl(), "wie", url, backend = "wie"))
 
-    session_nodes <- rvest::html_elements(doc, "li > strong")
-    if (length(session_nodes) == 0) return(links_to_protocols(empty_links_tbl(), "wie", url, backend = "wie"))
+    wp_nodes <- rvest::html_elements(
+      doc,
+      xpath = "//a[contains(translate(normalize-space(string()), 'WORTPROTOKOLL', 'wortprotokoll'), 'wortprotokoll')]"
+    )
+    if (length(wp_nodes) == 0) return(links_to_protocols(empty_links_tbl(), "wie", url, backend = "wie"))
 
-    out <- purrr::map_dfr(session_nodes, function(sn) {
-      li <- xml2::xml_parent(sn)
-      session_title <- stringr::str_squish(rvest::html_text2(sn))
-      pdf_node <- rvest::html_element(li, "a[href*='-w-'][href$='.pdf']")
-      if (length(pdf_node) == 0 || is.na(pdf_node)) return(tibble::tibble())
+    out <- purrr::map_dfr(wp_nodes, function(node) {
+      href <- rvest::html_attr(node, "href")
+      if (is.na(href) || href == "") return(tibble::tibble())
 
-      href <- rvest::html_attr(pdf_node, "href")
+      session_node <- xml2::xml_find_first(node, "ancestor::li[strong][1]/strong[1]")
+      session_title <- stringr::str_squish(rvest::html_text2(session_node))
+      if (is.na(session_title) || session_title == "") session_title <- basename(href)
+
       full <- xml2::url_absolute(href, url)
       tibble::tibble(
         text = paste0("Wortprotokoll ", session_title),
@@ -91,7 +107,8 @@ collect_wie_protocols <- function() {
       )
     })
 
-    links_to_protocols(out, state = "wie", source_url = url, backend = "wie")
+    links_to_protocols(out, state = "wie", source_url = url, backend = "wie") |>
+      dplyr::distinct(.data$protocol_url, .keep_all = TRUE)
   })
 }
 
