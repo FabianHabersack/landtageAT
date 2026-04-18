@@ -85,11 +85,31 @@ collect_wie_protocols <- function() {
     doc <- safe_fetch_html(url)
     if (is.null(doc)) return(links_to_protocols(empty_links_tbl(), "wie", url, backend = "wie"))
 
-    links <- extract_links(doc, url) |>
-      dplyr::mutate(text_lc = tolower(.data$text), url_lc = tolower(.data$url)) |>
+    nodes <- rvest::html_elements(doc, "a[href]")
+    if (length(nodes) == 0) return(links_to_protocols(empty_links_tbl(), "wie", url, backend = "wie"))
+
+    session_title <- vapply(seq_along(nodes), function(i) {
+      sn <- xml2::xml_find_first(nodes[[i]], "ancestor::li[strong][1]/strong[1]")
+      if (inherits(sn, "xml_missing")) return(NA_character_)
+      txt <- stringr::str_squish(rvest::html_text2(sn))
+      if (is.na(txt) || txt == "") NA_character_ else txt
+    }, FUN.VALUE = character(1))
+
+    links <- tibble::tibble(
+      text = rvest::html_text2(nodes),
+      href = rvest::html_attr(nodes, "href"),
+      session_title = session_title
+    ) |>
+      dplyr::filter(!is.na(.data$href), .data$href != "") |>
+      dplyr::mutate(
+        url = xml2::url_absolute(.data$href, url),
+        text = stringr::str_squish(.data$text),
+        text_lc = tolower(.data$text),
+        url_lc = tolower(.data$url)
+      ) |>
       dplyr::filter(
         stringr::str_detect(.data$url_lc, "ltg-"),
-        stringr::str_detect(.data$url_lc, "\\.(htm|html|pdf|doc)($|\\?)")
+        stringr::str_detect(.data$url_lc, "\\.(htm|html)($|\\?)")
       )
 
     wp_links <- links |>
@@ -102,7 +122,11 @@ collect_wie_protocols <- function() {
 
     out <- wp_links |>
       dplyr::transmute(
-        text = dplyr::if_else(.data$text == "", basename(.data$url), .data$text),
+        text = dplyr::if_else(
+          !is.na(.data$session_title) & .data$session_title != "",
+          paste0(dplyr::if_else(stringr::str_detect(.data$url_lc, "-w-"), "Wortprotokoll ", "Sitzungsbericht "), .data$session_title),
+          dplyr::if_else(.data$text == "", basename(.data$url), .data$text)
+        ),
         href = .data$href,
         url = .data$url
       )
