@@ -239,24 +239,93 @@ collect_vbg_protocols <- function(max_pages = 250, max_results = NULL) {
 }
 
 collect_tir_protocols <- function() {
-  url <- "https://lte.tirol.gv.at/public/sitzung/landtag/landtagsSitzungList.xhtml"
-  doc <- safe_fetch_html(url)
-  period_links <- extract_links(doc, url) |>
-    dplyr::filter(stringr::str_detect(tolower(paste(.data$text, .data$url)), "periode|landtag"))
+  base_url <- "https://lte.tirol.gv.at/public/sitzung/landtag/landtagsSitzungList.xhtml?cid=1"
+  cookie_file <- tempfile(fileext = ".cookies")
+  first <- tryCatch(
+    httr2::request(base_url) |>
+      httr2::req_user_agent("landtageAT/0.2.0") |>
+      httr2::req_timeout(30) |>
+      httr2::req_cookie_preserve(cookie_file) |>
+      httr2::req_perform(),
+    error = function(e) NULL
+  )
+  if (is.null(first)) return(links_to_protocols(empty_links_tbl(), "tir", base_url, backend = "tir"))
 
-  candidate_pages <- unique(c(
-    url,
-    "https://lte.tirol.gv.at/public/sitzung/sitzungsbericht/sitzungsberichtList.xhtml?cid=1",
-    period_links$url
-  ))
+  start_doc <- xml2::read_html(httr2::resp_body_string(first))
+  view_state <- rvest::html_attr(rvest::html_element(start_doc, "input[name='jakarta.faces.ViewState']"), "value")
+  token <- rvest::html_attr(rvest::html_element(start_doc, "input[name='token']"), "value")
 
-  links <- purrr::map_dfr(candidate_pages, function(u) {
-    d <- safe_fetch_html(u)
-    extract_links(d, u)
-  }) |>
-    dplyr::filter(stringr::str_detect(tolower(paste(.data$text, .data$url)), "protokoll|sitzungsbericht|wortprotokoll|\\.pdf|\\.doc"))
+  if (is.na(view_state) || is.na(token) || view_state == "" || token == "") {
+    return(links_to_protocols(empty_links_tbl(), "tir", base_url, backend = "tir"))
+  }
 
-  links_to_protocols(links, state = "tir", source_url = url, backend = "tir")
+  search_resp <- tryCatch(
+    httr2::request(base_url) |>
+      httr2::req_user_agent("landtageAT/0.2.0") |>
+      httr2::req_timeout(30) |>
+      httr2::req_cookie_preserve(cookie_file) |>
+      httr2::req_body_form(
+        "listContent:j_id_3n:entityComplete_input" = "",
+        "listContent:j_id_3n:entityComplete_hinput" = "",
+        "listContent:j_id_3q:menu_input" = "",
+        "listContent:j_id_3x_input" = "",
+        "listContent:j_id_3y_input" = "",
+        "listContent:j_id_3z_input" = "",
+        "listContent:j_id_44_9" = "listContent:j_id_44_9",
+        "token" = token,
+        "listContent:fid_SUBMIT" = "1",
+        "jakarta.faces.ViewState" = view_state
+      ) |>
+      httr2::req_perform(),
+    error = function(e) NULL
+  )
+  if (is.null(search_resp)) return(links_to_protocols(empty_links_tbl(), "tir", base_url, backend = "tir"))
+
+  result_doc <- xml2::read_html(httr2::resp_body_string(search_resp))
+  session_links <- tibble::tibble(
+    text = rvest::html_text2(rvest::html_elements(result_doc, xpath = "//*[@id='listContent:resultForm:resultTable_data']//a[@href]")),
+    href = rvest::html_attr(rvest::html_elements(result_doc, xpath = "//*[@id='listContent:resultForm:resultTable_data']//a[@href]"), "href")
+  ) |>
+    dplyr::mutate(url = xml2::url_absolute(.data$href, base_url)) |>
+    dplyr::filter(
+      stringr::str_detect(.data$url, "landtagsSitzungStamm\\.xhtml\\?id="),
+      !is.na(.data$url)
+    ) |>
+    dplyr::distinct(.data$url, .keep_all = TRUE)
+
+  if (nrow(session_links) == 0) return(links_to_protocols(empty_links_tbl(), "tir", base_url, backend = "tir"))
+
+  docs_links <- purrr::map_dfr(session_links$url, function(sess_url) {
+    sid <- stringr::str_match(sess_url, "id=([0-9]+)")[, 2]
+    if (is.na(sid)) return(empty_links_tbl())
+    docs_url <- sprintf("https://lte.tirol.gv.at/public/sitzung/landtag/landtagsSitzungDokList.xhtml?id=%s&cid=1", sid)
+    d <- safe_fetch_html(docs_url)
+    if (is.null(d)) return(empty_links_tbl())
+
+    rows <- rvest::html_elements(d, xpath = "//*[@id='listContent:resultForm:resultTable_data']//tr")
+    if (length(rows) == 0) return(empty_links_tbl())
+
+    tibble::tibble(
+      text = rvest::html_text2(rows),
+      href = vapply(rows, function(row) {
+        node <- rvest::html_element(row, xpath = ".//a[contains(@href, 'landtagsSitzungDokStamm.xhtml')]")
+        if (inherits(node, "xml_missing")) NA_character_ else rvest::html_attr(node, "href")
+      }, FUN.VALUE = character(1))
+    ) |>
+      dplyr::filter(
+        !is.na(.data$href),
+        stringr::str_detect(tolower(.data$text), "kurzprotokoll")
+      ) |>
+      dplyr::mutate(
+        text = stringr::str_squish(stringr::str_remove_all(.data$text, "^(pageview\\s*|file_pdf\\s*)+")),
+        text = stringr::str_squish(stringr::str_replace(.data$text, "\\$\\(function\\(\\)\\{.*$", ""))
+      ) |>
+      dplyr::mutate(url = xml2::url_absolute(.data$href, docs_url)) |>
+      dplyr::select(.data$text, .data$href, .data$url)
+  })
+
+  links_to_protocols(docs_links, state = "tir", source_url = base_url, backend = "tir") |>
+    dplyr::distinct(.data$protocol_url, .keep_all = TRUE)
 }
 
 collect_ooe_protocols <- function() {

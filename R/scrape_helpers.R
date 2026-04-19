@@ -110,9 +110,11 @@ fetch_landtag_elections <- function(force_refresh = FALSE) {
     }
     parties <- strsplit(null_or(payload$parties, ""), ",", fixed = TRUE)[[1]]
     parties <- parties[parties != ""]
-    party_votes <- stats::setNames(as.list(unname(unlist(row[parties]))), parties)
-
-    tibble::tibble(
+    party_vals <- stats::setNames(
+      vapply(parties, function(pid) suppressWarnings(as.numeric(null_or(row[[pid]], NA_real_))), FUN.VALUE = numeric(1)),
+      parties
+    )
+    base_row <- tibble::tibble(
       state = state,
       election_id = el,
       election_name = null_or(payload$name, candidates$election_name[[i]]),
@@ -120,9 +122,12 @@ fetch_landtag_elections <- function(force_refresh = FALSE) {
       election_eligible = as.numeric(null_or(row$eligible, NA_real_)),
       election_votes = as.numeric(null_or(row$votes, NA_real_)),
       election_valid = as.numeric(null_or(row$valid, NA_real_)),
-      election_invalid = as.numeric(null_or(row$invalid, NA_real_)),
-      election_party_results = list(party_votes)
+      election_invalid = as.numeric(null_or(row$invalid, NA_real_))
     )
+
+    if (length(party_vals) == 0) return(base_row)
+
+    dplyr::bind_cols(base_row, tibble::as_tibble(as.list(party_vals)))
   })
 
   if (nrow(out) == 0) return(tibble::tibble())
@@ -147,8 +152,7 @@ enrich_with_elections <- function(protocols) {
         election_eligible = numeric(),
         election_votes = numeric(),
         election_valid = numeric(),
-        election_invalid = numeric(),
-        election_party_results = list()
+        election_invalid = numeric()
       ))
   }
 
@@ -162,8 +166,7 @@ enrich_with_elections <- function(protocols) {
         election_eligible = NA_real_,
         election_votes = NA_real_,
         election_valid = NA_real_,
-        election_invalid = NA_real_,
-        election_party_results = purrr::map(seq_len(dplyr::n()), ~NA)
+        election_invalid = NA_real_
       ))
   }
 
@@ -183,8 +186,7 @@ enrich_with_elections <- function(protocols) {
           election_eligible = NA_real_,
           election_votes = NA_real_,
           election_valid = NA_real_,
-          election_invalid = NA_real_,
-          election_party_results = vector("list", dplyr::n())
+          election_invalid = NA_real_
         ))
     }
 
@@ -201,11 +203,7 @@ enrich_with_elections <- function(protocols) {
         election_eligible = dplyr::if_else(has_match, e$election_eligible[idx_safe], NA_real_),
         election_votes = dplyr::if_else(has_match, e$election_votes[idx_safe], NA_real_),
         election_valid = dplyr::if_else(has_match, e$election_valid[idx_safe], NA_real_),
-        election_invalid = dplyr::if_else(has_match, e$election_invalid[idx_safe], NA_real_),
-        election_party_results = purrr::map(seq_len(dplyr::n()), function(i) {
-          if (!has_match[[i]]) return(NA)
-          e$election_party_results[[idx_safe[[i]]]]
-        })
+        election_invalid = dplyr::if_else(has_match, e$election_invalid[idx_safe], NA_real_)
       )
   })
 
@@ -224,19 +222,16 @@ enrich_with_elections <- function(protocols) {
     )
   }
 
-  all_party_ids <- sort(unique(unlist(purrr::map(out$election_party_results, function(x) {
-    if (is.list(x)) names(x) else character()
-  }))))
+  party_source_cols <- setdiff(
+    names(elections),
+    c("state", "election_id", "election_name", "election_date", "election_eligible", "election_votes", "election_valid", "election_invalid", "legislative_period")
+  )
+  if (length(party_source_cols) == 0) return(out)
 
-  if (length(all_party_ids) == 0) return(out)
-
-  for (pid in all_party_ids) {
+  for (pid in party_source_cols) {
     col <- party_name(pid)
-    out[[col]] <- vapply(out$election_party_results, function(x) {
-      if (!is.list(x)) return(NA_real_)
-      if (!(pid %in% names(x))) return(NA_real_)
-      suppressWarnings(as.numeric(x[[pid]]))
-    }, FUN.VALUE = numeric(1))
+    out[[col]] <- if (pid %in% names(out)) suppressWarnings(as.numeric(out[[pid]])) else NA_real_
+    if (pid != col && pid %in% names(out)) out[[pid]] <- NULL
   }
 
   out
