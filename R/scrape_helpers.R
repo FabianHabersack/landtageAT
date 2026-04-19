@@ -1,0 +1,488 @@
+empty_links_tbl <- function() {
+  tibble::tibble(text = character(), href = character(), url = character())
+}
+
+fetch_html <- function(url, user_agent = "landtageAT/0.2.0") {
+  req <- httr2::request(url) |>
+    httr2::req_user_agent(user_agent) |>
+    httr2::req_timeout(30)
+  resp <- httr2::req_perform(req)
+  raw <- httr2::resp_body_raw(resp)
+
+  tryCatch(
+    xml2::read_html(raw),
+    error = function(e) {
+      txt <- rawToChar(raw)
+      txt_utf8 <- iconv(txt, from = "latin1", to = "UTF-8", sub = "")
+      xml2::read_html(txt_utf8)
+    }
+  )
+}
+
+safe_fetch_html <- function(url) {
+  tryCatch(fetch_html(url), error = function(e) NULL)
+}
+
+null_or <- function(x, y) {
+  if (is.null(x) || length(x) == 0) y else x
+}
+
+election_state_map <- function(x) {
+  key <- tolower(iconv(x, from = "", to = "ASCII//TRANSLIT"))
+  dplyr::recode(
+    key,
+    "burgenland" = "bgld",
+    "karnten" = "ktn",
+    "niederosterreich" = "noe",
+    "oberosterreich" = "ooe",
+    "salzburg" = "sbg",
+    "steiermark" = "stm",
+    "tirol" = "tir",
+    "vorarlberg" = "vbg",
+    "wien" = "wie",
+    .default = NA_character_
+  )
+}
+
+.election_cache <- new.env(parent = emptyenv())
+
+fetch_landtag_elections <- function(force_refresh = FALSE) {
+  if (!force_refresh && !is.null(.election_cache$data) && nrow(.election_cache$data) > 0) {
+    return(.election_cache$data)
+  }
+
+  basics <- tryCatch(
+    jsonlite::fromJSON("https://www.wahldatenbank.at/basics.json"),
+    error = function(e) NULL
+  )
+
+  if (is.null(basics) || is.null(basics$wahlen)) return(tibble::tibble())
+
+  wahlen <- basics$wahlen
+  ids <- names(wahlen)
+  names_vec <- vapply(wahlen, function(x) null_or(x$name, NA_character_), FUN.VALUE = character(1))
+  levels_vec <- vapply(wahlen, function(x) paste(null_or(x$levels, character()), collapse = ","), FUN.VALUE = character(1))
+
+  id_to_state <- function(election_id) {
+    code <- stringr::str_match(election_id, "^ltw([a-z]+)\\d{4}$")[, 2]
+    dplyr::recode(
+      code,
+      "bgld" = "bgld",
+      "ktn" = "ktn",
+      "noe" = "noe",
+      "ooe" = "ooe",
+      "sbg" = "sbg",
+      "stmk" = "stm",
+      "tir" = "tir",
+      "vbg" = "vbg",
+      "wie" = "wie",
+      .default = NA_character_
+    )
+  }
+
+  candidates <- tibble::tibble(
+    election_id = ids,
+    election_name = names_vec,
+    levels = levels_vec
+  ) |>
+    dplyr::filter(
+      stringr::str_detect(.data$election_id, "^ltw[a-z]+\\d{4}$"),
+      stringr::str_detect(.data$levels, "Bundesland")
+    ) |>
+    dplyr::mutate(state = id_to_state(.data$election_id)) |>
+    dplyr::filter(!is.na(.data$state))
+
+  out <- purrr::map_dfr(seq_len(nrow(candidates)), function(i) {
+    el <- candidates$election_id[[i]]
+    state <- candidates$state[[i]]
+
+    payload <- tryCatch(
+      jsonlite::fromJSON(sprintf("https://www.wahldatenbank.at/get_election.php?el=%s&lvl=Bundesland", el)),
+      error = function(e) NULL
+    )
+
+    if (is.null(payload) || is.null(payload$data) || length(payload$data) == 0) return(tibble::tibble())
+
+    row <- if (is.data.frame(payload$data)) {
+      as.list(payload$data[1, , drop = TRUE])
+    } else {
+      payload$data[[1]]
+    }
+    parties <- strsplit(null_or(payload$parties, ""), ",", fixed = TRUE)[[1]]
+    parties <- parties[parties != ""]
+    party_vals <- stats::setNames(
+      vapply(parties, function(pid) suppressWarnings(as.numeric(null_or(row[[pid]], NA_real_))), FUN.VALUE = numeric(1)),
+      parties
+    )
+    base_row <- tibble::tibble(
+      state = state,
+      election_id = el,
+      election_name = null_or(payload$name, candidates$election_name[[i]]),
+      election_date = as.Date(null_or(payload$date, NA_character_)),
+      election_eligible = as.numeric(null_or(row$eligible, NA_real_)),
+      election_votes = as.numeric(null_or(row$votes, NA_real_)),
+      election_valid = as.numeric(null_or(row$valid, NA_real_)),
+      election_invalid = as.numeric(null_or(row$invalid, NA_real_))
+    )
+
+    if (length(party_vals) == 0) return(base_row)
+
+    dplyr::bind_cols(base_row, tibble::as_tibble(as.list(party_vals)))
+  })
+
+  if (nrow(out) == 0) return(tibble::tibble())
+
+  out <- out |>
+    dplyr::arrange(.data$state, .data$election_date) |>
+    dplyr::group_by(.data$state) |>
+    dplyr::mutate(legislative_period = as.character(dplyr::row_number())) |>
+    dplyr::ungroup()
+
+  .election_cache$data <- out
+  out
+}
+
+enrich_with_elections <- function(protocols) {
+  if (nrow(protocols) == 0) {
+    return(protocols |>
+      dplyr::mutate(
+        election_id = character(),
+        election_name = character(),
+        election_date = as.Date(character()),
+        election_eligible = numeric(),
+        election_votes = numeric(),
+        election_valid = numeric(),
+        election_invalid = numeric()
+      ))
+  }
+
+  elections <- fetch_landtag_elections()
+  if (nrow(elections) == 0) {
+    return(protocols |>
+      dplyr::mutate(
+        election_id = NA_character_,
+        election_name = NA_character_,
+        election_date = as.Date(NA),
+        election_eligible = NA_real_,
+        election_votes = NA_real_,
+        election_valid = NA_real_,
+        election_invalid = NA_real_
+      ))
+  }
+
+  split_protocols <- split(protocols, protocols$state)
+  enriched <- purrr::map_dfr(split_protocols, function(df_state) {
+    st <- df_state$state[[1]]
+    e <- dplyr::filter(elections, .data$state == st) |>
+      dplyr::arrange(.data$election_date)
+
+    if (nrow(e) == 0) {
+      return(df_state |>
+        dplyr::mutate(
+          legislative_period = NA_character_,
+          election_id = NA_character_,
+          election_name = NA_character_,
+          election_date = as.Date(NA),
+          election_eligible = NA_real_,
+          election_votes = NA_real_,
+          election_valid = NA_real_,
+          election_invalid = NA_real_
+        ))
+    }
+
+    idx <- findInterval(df_state$session_date, e$election_date)
+    has_match <- !is.na(idx) & idx > 0
+    idx_safe <- pmax(idx, 1)
+
+    df_state |>
+      dplyr::mutate(
+        legislative_period = dplyr::if_else(has_match, e$legislative_period[idx_safe], NA_character_),
+        election_id = dplyr::if_else(has_match, e$election_id[idx_safe], NA_character_),
+        election_name = dplyr::if_else(has_match, e$election_name[idx_safe], NA_character_),
+        election_date = dplyr::if_else(has_match, e$election_date[idx_safe], as.Date(NA)),
+        election_eligible = dplyr::if_else(has_match, e$election_eligible[idx_safe], NA_real_),
+        election_votes = dplyr::if_else(has_match, e$election_votes[idx_safe], NA_real_),
+        election_valid = dplyr::if_else(has_match, e$election_valid[idx_safe], NA_real_),
+        election_invalid = dplyr::if_else(has_match, e$election_invalid[idx_safe], NA_real_)
+      )
+  })
+
+  out <- dplyr::bind_rows(enriched)
+
+  party_name <- function(id) {
+    dplyr::recode(
+      id,
+      "spoe" = "SPÖ",
+      "oevp" = "ÖVP",
+      "fpoe" = "FPÖ",
+      "gruene" = "GRÜNE",
+      "neos" = "NEOS",
+      "kpoe" = "KPÖ",
+      .default = toupper(id)
+    )
+  }
+
+  party_source_cols <- setdiff(
+    names(elections),
+    c("state", "election_id", "election_name", "election_date", "election_eligible", "election_votes", "election_valid", "election_invalid", "legislative_period")
+  )
+  if (length(party_source_cols) == 0) return(out)
+
+  for (pid in party_source_cols) {
+    col <- party_name(pid)
+    out[[col]] <- if (pid %in% names(out)) suppressWarnings(as.numeric(out[[pid]])) else NA_real_
+    if (pid != col && pid %in% names(out)) out[[pid]] <- NULL
+  }
+
+  out
+}
+
+extract_links <- function(doc, base_url, pattern = NULL) {
+  if (is.null(doc)) return(empty_links_tbl())
+  href_nodes <- rvest::html_elements(doc, "a")
+  if (length(href_nodes) == 0) return(empty_links_tbl())
+
+  out <- tibble::tibble(
+    text = rvest::html_text2(href_nodes),
+    href = rvest::html_attr(href_nodes, "href")
+  ) |>
+    dplyr::filter(!is.na(.data$href), .data$href != "") |>
+    dplyr::filter(!stringr::str_detect(tolower(.data$href), "^(javascript:|mailto:|tel:|data:|#)")) |>
+    dplyr::mutate(
+      url = xml2::url_absolute(.data$href, base = base_url),
+      text = stringr::str_squish(.data$text)
+    ) |>
+    dplyr::filter(!is.na(.data$url), .data$url != "")
+
+  if (!is.null(pattern)) {
+    out <- dplyr::filter(out, stringr::str_detect(tolower(.data$url), tolower(pattern)))
+  }
+
+  dplyr::distinct(out, .data$url, .keep_all = TRUE)
+}
+
+infer_legislative_period <- function(x) {
+  txt <- tolower(x)
+
+  gp_roman_prefix <- stringr::str_extract(txt, "(?:gp[-_ ]?|gesetzgebungsperiode[-_ ]?)([xivlcdm]{1,8})")
+  gp_roman_prefix <- stringr::str_replace(gp_roman_prefix, "(?:gp[-_ ]?|gesetzgebungsperiode[-_ ]?)", "")
+
+  gp_roman_suffix <- stringr::str_extract(txt, "([xivlcdm]{1,8})[-_ ]?gp")
+  gp_roman_suffix <- stringr::str_replace(gp_roman_suffix, "[-_ ]?gp", "")
+
+  gp_arabic <- stringr::str_extract(txt, "\\b\\d{1,2}\\.?\\s*gesetzgebungsperiode")
+  gp_arabic <- stringr::str_extract(gp_arabic, "\\d{1,2}")
+
+  slash_roman <- stringr::str_extract(txt, "/sitzungen/([xivlcdm]{1,8})")
+  slash_roman <- stringr::str_replace(slash_roman, "/sitzungen/", "")
+
+  lt_roman <- stringr::str_extract(txt, "([xivlcdm]{1,8})\\.?\\s*landtagsperiode")
+  lt_roman <- stringr::str_extract(lt_roman, "[xivlcdm]{1,8}")
+
+  out <- dplyr::coalesce(gp_roman_prefix, gp_roman_suffix, gp_arabic, slash_roman, lt_roman)
+  toupper(out)
+}
+
+
+normalize_legislative_period <- function(x) {
+  if (length(x) == 0) return(character())
+  clean <- stringr::str_squish(toupper(as.character(x)))
+  clean[clean %in% c("", "NA", "N/A")] <- NA_character_
+
+  out <- clean
+  is_roman <- !is.na(clean) & stringr::str_detect(clean, "^[IVXLCDM]+$")
+  if (any(is_roman)) {
+    out[is_roman] <- as.character(suppressWarnings(as.numeric(as.roman(clean[is_roman]))))
+  }
+
+  # keep arabic as-is
+  is_num <- !is.na(clean) & stringr::str_detect(clean, "^\\d+$")
+  out[is_num] <- clean[is_num]
+  out
+}
+
+infer_date <- function(x) {
+  if (length(x) == 0) return(as.Date(character()))
+
+  month_map <- c(
+    "janner" = 1L, "jaenner" = 1L, "januar" = 1L,
+    "feber" = 2L, "februar" = 2L,
+    "marz" = 3L, "maerz" = 3L,
+    "april" = 4L, "mai" = 5L, "juni" = 6L, "juli" = 7L, "august" = 8L,
+    "september" = 9L, "oktober" = 10L, "november" = 11L, "dezember" = 12L
+  )
+
+  parse_one <- function(txt) {
+    safe_date <- function(value, fmt = NULL) {
+      tryCatch(
+        if (is.null(fmt)) as.Date(value) else as.Date(value, format = fmt),
+        error = function(e) as.Date(NA)
+      )
+    }
+
+    s <- tolower(iconv(null_or(txt, ""), from = "", to = "ASCII//TRANSLIT"))
+    s <- gsub("([0-9])([[:alpha:]])", "\\1 \\2", s)
+    s <- gsub("([[:alpha:]])([0-9])", "\\1 \\2", s)
+    s <- gsub("\\s+", " ", s)
+
+    # numeric formats first (yyyy-mm-dd, dd.mm.yyyy, dd-mm-yyyy)
+    y <- stringr::str_extract(s, "\\d{4}-\\d{2}-\\d{2}|\\d{1,2}[\\.-]\\d{1,2}[\\.-]\\d{4}")
+    if (!is.na(y)) {
+      if (stringr::str_detect(y, "^\\d{4}-")) {
+        d <- suppressWarnings(safe_date(y))
+        if (!is.na(d)) return(format(d, "%Y-%m-%d"))
+      } else {
+        y2 <- gsub("\\.", "-", y)
+        d <- suppressWarnings(safe_date(y2, fmt = "%d-%m-%Y"))
+        if (!is.na(d)) return(format(d, "%Y-%m-%d"))
+      }
+    }
+
+    month_re <- paste(names(month_map), collapse = "|")
+    mloc <- stringr::str_locate(s, month_re)
+    if (is.na(mloc[1])) return(NA_character_)
+
+    month_txt <- stringr::str_sub(s, mloc[1], mloc[2])
+    month_num <- month_map[[month_txt]]
+    if (is.null(month_num) || is.na(month_num)) return(NA_character_)
+
+    prefix <- stringr::str_sub(s, max(1, mloc[1] - 30), mloc[1] - 1)
+    day_txt <- stringr::str_extract(prefix, "\\d{1,2}")
+    day_num <- suppressWarnings(as.integer(day_txt))
+    if (is.na(day_num)) return(NA_character_)
+
+    suffix <- stringr::str_sub(s, mloc[2] + 1)
+    year_txt <- stringr::str_extract(suffix, "\\d{4}")
+    if (is.na(year_txt)) year_txt <- stringr::str_extract(s, "\\d{4}")
+    year_num <- suppressWarnings(as.integer(year_txt))
+    if (is.na(year_num)) return(NA_character_)
+
+    out <- suppressWarnings(safe_date(sprintf("%04d-%02d-%02d", year_num, month_num, day_num)))
+    if (is.na(out)) return(NA_character_)
+    format(out, "%Y-%m-%d")
+  }
+
+  parsed <- vapply(x, parse_one, FUN.VALUE = character(1))
+  as.Date(parsed)
+}
+
+is_document_url <- function(url) {
+  stringr::str_detect(tolower(url), "\\.(pdf|doc|docx|rtf|odt|txt)($|\\?)")
+}
+
+is_html_url <- function(url) {
+  stringr::str_detect(tolower(url), "^https?://") &
+    !is_document_url(url) &
+    !stringr::str_detect(tolower(url), "\\.(jpg|jpeg|png|gif|zip|mp3|mp4)($|\\?)")
+}
+
+filter_links_for_state <- function(links, include_pattern, exclude_pattern = NULL) {
+  if (nrow(links) == 0) return(links)
+  out <- dplyr::filter(links, stringr::str_detect(tolower(paste(.data$text, .data$url)), tolower(include_pattern)))
+  if (!is.null(exclude_pattern)) {
+    out <- dplyr::filter(out, !stringr::str_detect(tolower(paste(.data$text, .data$url)), tolower(exclude_pattern)))
+  }
+  dplyr::distinct(out, .data$url, .keep_all = TRUE)
+}
+
+follow_relevant_links <- function(seed_links, include_pattern, exclude_pattern = NULL) {
+  if (nrow(seed_links) == 0) return(empty_links_tbl())
+  candidates <- dplyr::filter(seed_links, is_html_url(.data$url))
+  if (nrow(candidates) == 0) return(empty_links_tbl())
+
+  discovered <- purrr::map_dfr(candidates$url, function(u) {
+    doc <- safe_fetch_html(u)
+    links <- extract_links(doc, u)
+    filter_links_for_state(links, include_pattern = include_pattern, exclude_pattern = exclude_pattern)
+  })
+
+  dplyr::distinct(discovered, .data$url, .keep_all = TRUE)
+}
+
+
+safe_url_basename <- function(url) {
+  if (is.na(url) || url == "") return(NA_character_)
+  clean <- strsplit(url, "?", fixed = TRUE)[[1]][1]
+  out <- suppressWarnings(tryCatch(basename(clean), error = function(e) NA_character_))
+  if (is.na(out) || out == "" || nchar(out) > 180) {
+    short <- substr(gsub("[^A-Za-z0-9]+", "_", clean), 1, 80)
+    if (short == "") short <- "document"
+    out <- short
+  }
+  out
+}
+
+links_to_protocols <- function(links, state, source_url, backend = "html") {
+  if (nrow(links) == 0) {
+    return(tibble::tibble(
+      state = character(),
+      state_name = character(),
+      session_id = character(),
+      session_date = as.Date(character()),
+      title = character(),
+      legislative_period = character(),
+      protocol_url = character(),
+      document_type = character(),
+      source_url = character(),
+      backend = character(),
+      scraped_at = as.POSIXct(character())
+    ))
+  }
+
+  links |>
+    dplyr::mutate(
+      session_date = infer_date(paste(.data$text, .data$url)),
+      legislative_period = infer_legislative_period(paste(.data$text, .data$url, source_url)),
+      title = dplyr::if_else(.data$text == "", vapply(.data$url, safe_url_basename, FUN.VALUE = character(1)), .data$text),
+      document_type = dplyr::case_when(
+        stringr::str_detect(tolower(.data$url), "\\.pdf($|\\?)") ~ "pdf",
+        stringr::str_detect(tolower(.data$url), "\\.docx?($|\\?)") ~ "doc",
+        stringr::str_detect(tolower(.data$url), "\\.rtf($|\\?)") ~ "rtf",
+        TRUE ~ "html"
+      ),
+      session_id = dplyr::coalesce(
+        stringr::str_extract(.data$url, "(Sitzung|Sitz|TOP|ltg)[-_ ]?\\d{1,4}"),
+        paste0(state, "-", dplyr::row_number())
+      )
+    ) |>
+    dplyr::transmute(
+      state = state,
+      state_name = state_name(state),
+      session_id = .data$session_id,
+      session_date = .data$session_date,
+      title = .data$title,
+      legislative_period = normalize_legislative_period(.data$legislative_period),
+      protocol_url = .data$url,
+      document_type = .data$document_type,
+      source_url = source_url,
+      backend = backend,
+      scraped_at = Sys.time()
+    )
+}
+
+crawl_for_pdfs <- function(seed_url, max_depth = 1) {
+  visited <- character()
+  queue <- list(list(url = seed_url, depth = 0))
+  found <- empty_links_tbl()
+
+  while (length(queue) > 0) {
+    current <- queue[[1]]
+    queue <- queue[-1]
+    if (current$url %in% visited) next
+    visited <- c(visited, current$url)
+
+    doc <- safe_fetch_html(current$url)
+    links <- extract_links(doc, current$url)
+    if (nrow(links) == 0) next
+
+    pdf_links <- dplyr::filter(links, is_document_url(.data$url))
+    found <- dplyr::bind_rows(found, pdf_links)
+
+    if (current$depth < max_depth) {
+      html_links <- dplyr::filter(links, is_html_url(.data$url))
+      queue <- c(queue, purrr::map(html_links$url, ~list(url = .x, depth = current$depth + 1)))
+    }
+  }
+
+  dplyr::distinct(found, .data$url, .keep_all = TRUE)
+}
