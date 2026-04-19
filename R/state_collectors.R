@@ -304,7 +304,7 @@ collect_tir_protocols <- function() {
     list(links = links, total = total)
   }
 
-  years <- seq.int(as.integer(format(Sys.Date(), "%Y")), 1918L, by = -1L)
+  years <- seq.int(as.integer(format(Sys.Date(), "%Y")), 1900L, by = -1L)
   session_links <- purrr::map_dfr(years, function(y) {
     from_date <- as.Date(sprintf("%04d-01-01", y))
     to_date <- as.Date(sprintf("%04d-12-31", y))
