@@ -304,7 +304,7 @@ collect_tir_protocols <- function() {
     list(links = links, total = total)
   }
 
-  years <- seq.int(as.integer(format(Sys.Date(), "%Y")), 2010L, by = -1L)
+  years <- seq.int(as.integer(format(Sys.Date(), "%Y")), 1900L, by = -1L)
   session_links <- purrr::map_dfr(years, function(y) {
     from_date <- as.Date(sprintf("%04d-01-01", y))
     to_date <- as.Date(sprintf("%04d-12-31", y))
@@ -314,7 +314,6 @@ collect_tir_protocols <- function() {
     dplyr::distinct(.data$url, .keep_all = TRUE) |>
     dplyr::mutate(session_date = infer_date(.data$text)) |>
     dplyr::arrange(dplyr::desc(.data$session_date), dplyr::desc(.data$url)) |>
-    dplyr::slice_head(n = 30) |>
     dplyr::select(-"session_date")
 
   if (nrow(session_links) == 0) return(links_to_protocols(empty_links_tbl(), "tir", base_url, backend = "tir"))
