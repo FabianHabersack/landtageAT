@@ -262,8 +262,22 @@ collect_tir_protocols <- function() {
 collect_ooe_protocols <- function() {
   url <- "https://www.land-oberoesterreich.gv.at/ltgspsuche.htm"
   doc <- safe_fetch_html(url)
-  links <- extract_links(doc, url) |>
-    dplyr::filter(stringr::str_detect(tolower(paste(.data$text, .data$url)), "protokoll|sitzung|stenograph|\\.pdf"))
+  period_pages <- extract_links(doc, url) |>
+    dplyr::filter(stringr::str_detect(tolower(paste(.data$text, .data$url)), "gesetzgebungsperiode|\\bgp\\b")) |>
+    dplyr::distinct(.data$url) |>
+    dplyr::pull(.data$url)
+
+  nested <- purrr::map_dfr(period_pages, function(u) {
+    d <- safe_fetch_html(u)
+    extract_links(d, u)
+  })
+
+  links <- nested |>
+    dplyr::filter(
+      stringr::str_detect(tolower(.data$url), "internetltgbeilagenanzeige\\.jsp"),
+      stringr::str_detect(tolower(.data$text), "wortprotokoll")
+    )
+
   links_to_protocols(links, state = "ooe", source_url = url, backend = "ooe")
 }
 

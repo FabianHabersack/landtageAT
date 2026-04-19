@@ -209,7 +209,37 @@ enrich_with_elections <- function(protocols) {
       )
   })
 
-  dplyr::bind_rows(enriched)
+  out <- dplyr::bind_rows(enriched)
+
+  party_name <- function(id) {
+    dplyr::recode(
+      id,
+      "spoe" = "SPÖ",
+      "oevp" = "ÖVP",
+      "fpoe" = "FPÖ",
+      "gruene" = "GRÜNE",
+      "neos" = "NEOS",
+      "kpoe" = "KPÖ",
+      .default = toupper(id)
+    )
+  }
+
+  all_party_ids <- sort(unique(unlist(purrr::map(out$election_party_results, function(x) {
+    if (is.list(x)) names(x) else character()
+  }))))
+
+  if (length(all_party_ids) == 0) return(out)
+
+  for (pid in all_party_ids) {
+    col <- party_name(pid)
+    out[[col]] <- vapply(out$election_party_results, function(x) {
+      if (!is.list(x)) return(NA_real_)
+      if (!(pid %in% names(x))) return(NA_real_)
+      suppressWarnings(as.numeric(x[[pid]]))
+    }, FUN.VALUE = numeric(1))
+  }
+
+  out
 }
 
 extract_links <- function(doc, base_url, pattern = NULL) {
