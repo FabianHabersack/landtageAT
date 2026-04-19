@@ -39,8 +39,8 @@
 .state_backend_config <- tibble::tribble(
   ~state, ~include_pattern, ~exclude_pattern, ~crawl_depth_default, ~follow_level1,
   "bgld", "protok|steno|sitz|landtagssitzung|gp|archiv|\\.pdf($|\\?)", "impressum|datenschutz|kontakt|javascript:", 0L, TRUE,
-  "ktn", "protok|steno|sitz|landtag|\\.pdf($|\\?)", "impressum|datenschutz|kontakt|javascript:", 0L, FALSE,
-  "noe", "sitz|protok|steno|plenar|gesetzgeb|\\.pdf($|\\?)", "impressum|datenschutz|kontakt|javascript:", 0L, TRUE,
+  "ktn", "protok|steno|sitz|landtag|\\.pdf($|\\?)", "impressum|datenschutz|kontakt|javascript:|besucher|mediathek", 0L, FALSE,
+  "noe", "sitz|protok|steno|plenar|gesetzgeb|\\.pdf($|\\?)", "impressum|datenschutz|kontakt|javascript:|sitzplan|kalender|\\.ics", 0L, TRUE,
   "ooe", "protok|steno|landtag|plenar|\\.pdf($|\\?)", "impressum|datenschutz|kontakt|javascript:", 0L, TRUE,
   "sbg", "landtag|material|protok|steno|periode|\\.pdf($|\\?)", "impressum|datenschutz|kontakt|javascript:", 0L, TRUE,
   "stm", "protok|steno|sitz|gesetzgebungsperiode|periode|\\.pdf($|\\?)", "impressum|datenschutz|kontakt|javascript:", 0L, TRUE,

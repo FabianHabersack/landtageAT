@@ -65,6 +65,38 @@ collect_stm_protocols <- function() {
   })
 }
 
+collect_ktn_protocols <- function() {
+  url <- "https://www.ktn.gv.at/Politik/Landtag/Stenographische-Protokolle"
+  doc <- safe_fetch_html(url)
+  links <- extract_links(doc, url) |>
+    dplyr::filter(
+      stringr::str_detect(tolower(paste(.data$text, .data$url)), "stenograph|protokoll|wortprotokoll|sitzung"),
+      !stringr::str_detect(tolower(paste(.data$text, .data$url)), "besucher|mediathek|kontakt|impressum")
+    )
+  links_to_protocols(links, state = "ktn", source_url = url, backend = "ktn")
+}
+
+collect_noe_protocols <- function() {
+  url <- "https://noe-landtag.gv.at/sitzungen"
+  doc <- safe_fetch_html(url)
+  session_pages <- extract_links(doc, url) |>
+    dplyr::filter(stringr::str_detect(tolower(.data$url), "/veranstaltungen/")) |>
+    dplyr::distinct(.data$url) |>
+    dplyr::pull(.data$url)
+
+  nested <- purrr::map_dfr(session_pages, function(u) {
+    d <- safe_fetch_html(u)
+    extract_links(d, u)
+  })
+
+  links <- nested |>
+    dplyr::filter(
+      stringr::str_detect(tolower(paste(.data$text, .data$url)), "protokoll|wortprotokoll|stenograph|\\.pdf|\\.doc"),
+      !stringr::str_detect(tolower(paste(.data$text, .data$url)), "sitzplan|kalender|in kalender speichern|\\.ics")
+    )
+  links_to_protocols(links, state = "noe", source_url = url, backend = "noe")
+}
+
 collect_wie_protocols <- function() {
   overview_url <- "https://www.wien.gv.at/mdb/ltg/"
   overview_doc <- safe_fetch_html(overview_url)
@@ -209,8 +241,21 @@ collect_vbg_protocols <- function(max_pages = 250, max_results = NULL) {
 collect_tir_protocols <- function() {
   url <- "https://lte.tirol.gv.at/public/sitzung/landtag/landtagsSitzungList.xhtml"
   doc <- safe_fetch_html(url)
-  links <- extract_links(doc, url) |>
-    dplyr::filter(stringr::str_detect(tolower(paste(.data$text, .data$url)), "sitzung|protokoll|landtag"))
+  period_links <- extract_links(doc, url) |>
+    dplyr::filter(stringr::str_detect(tolower(paste(.data$text, .data$url)), "periode|landtag"))
+
+  candidate_pages <- unique(c(
+    url,
+    "https://lte.tirol.gv.at/public/sitzung/sitzungsbericht/sitzungsberichtList.xhtml?cid=1",
+    period_links$url
+  ))
+
+  links <- purrr::map_dfr(candidate_pages, function(u) {
+    d <- safe_fetch_html(u)
+    extract_links(d, u)
+  }) |>
+    dplyr::filter(stringr::str_detect(tolower(paste(.data$text, .data$url)), "protokoll|sitzungsbericht|wortprotokoll|\\.pdf|\\.doc"))
+
   links_to_protocols(links, state = "tir", source_url = url, backend = "tir")
 }
 
@@ -223,13 +268,23 @@ collect_ooe_protocols <- function() {
 }
 
 collect_sbg_protocols <- function() {
-  url <- paste0(
+  url_new <- paste0(
     "https://service.salzburg.gv.at/lpi/searchExtern?datumVon=01.01.1994&datumBis=",
     format(Sys.Date(), "%d.%m.%Y"),
     "&artId=3&fraktionId=&periode=&session=&beilage=&titel=&text=&search="
   )
-  doc <- safe_fetch_html(url)
-  links <- extract_links(doc, url) |>
-    dplyr::filter(stringr::str_detect(tolower(paste(.data$text, .data$url)), "protokoll|sitzung|\\.pdf"))
-  links_to_protocols(links, state = "sbg", source_url = url, backend = "sbg")
+  doc_new <- safe_fetch_html(url_new)
+  links_new <- extract_links(doc_new, url_new) |>
+    dplyr::filter(stringr::str_detect(tolower(paste(.data$text, .data$url)), "protokoll|sitzung|stenograph|\\.pdf|\\.doc"))
+
+  url_old <- "https://alex.onb.ac.at/slt.htm"
+  doc_old <- safe_fetch_html(url_old)
+  alex_index <- extract_links(doc_old, url_old) |>
+    dplyr::filter(stringr::str_detect(tolower(paste(.data$text, .data$url)), "protokoll|stenograph|sitzung|slt|\\d{4}|\\.pdf")) |>
+    dplyr::slice_head(n = 120)
+  links_old <- alex_index |>
+    dplyr::filter(stringr::str_detect(tolower(paste(.data$text, .data$url)), "protokoll|stenograph|sitzung|\\.pdf|\\.tif|\\.jpg"))
+
+  links <- dplyr::bind_rows(links_new, links_old)
+  links_to_protocols(links, state = "sbg", source_url = url_new, backend = "sbg")
 }

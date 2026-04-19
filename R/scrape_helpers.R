@@ -258,6 +258,7 @@ infer_legislative_period <- function(x) {
   toupper(out)
 }
 
+
 normalize_legislative_period <- function(x) {
   if (length(x) == 0) return(character())
   clean <- stringr::str_squish(toupper(as.character(x)))
@@ -276,16 +277,58 @@ normalize_legislative_period <- function(x) {
 }
 
 infer_date <- function(x) {
-  y <- stringr::str_extract(x, "\\d{4}-\\d{2}-\\d{2}|\\d{2}\\.\\d{2}\\.\\d{4}|\\d{1,2}\\.\\d{1,2}\\.\\d{4}")
-  y <- dplyr::case_when(
-    is.na(y) ~ NA_character_,
-    stringr::str_detect(y, "^\\d{4}-") ~ y,
-    TRUE ~ gsub("\\.", "-", y)
+  if (length(x) == 0) return(as.Date(character()))
+
+  month_map <- c(
+    "janner" = 1L, "jaenner" = 1L, "januar" = 1L,
+    "feber" = 2L, "februar" = 2L,
+    "marz" = 3L, "maerz" = 3L,
+    "april" = 4L, "mai" = 5L, "juni" = 6L, "juli" = 7L, "august" = 8L,
+    "september" = 9L, "oktober" = 10L, "november" = 11L, "dezember" = 12L
   )
-  out <- suppressWarnings(as.Date(y, format = "%d-%m-%Y"))
-  needs_iso <- is.na(out) & !is.na(y)
-  out[needs_iso] <- suppressWarnings(as.Date(y[needs_iso]))
-  out
+
+  parse_one <- function(txt) {
+    s <- tolower(iconv(null_or(txt, ""), from = "", to = "ASCII//TRANSLIT"))
+    s <- gsub("([0-9])([[:alpha:]])", "\\1 \\2", s)
+    s <- gsub("([[:alpha:]])([0-9])", "\\1 \\2", s)
+    s <- gsub("\\s+", " ", s)
+
+    # numeric formats first (yyyy-mm-dd, dd.mm.yyyy, dd-mm-yyyy)
+    y <- stringr::str_extract(s, "\\d{4}-\\d{2}-\\d{2}|\\d{1,2}[\\.-]\\d{1,2}[\\.-]\\d{4}")
+    if (!is.na(y)) {
+      if (stringr::str_detect(y, "^\\d{4}-")) {
+        d <- suppressWarnings(as.Date(y))
+        if (!is.na(d)) return(d)
+      } else {
+        y2 <- gsub("\\.", "-", y)
+        d <- suppressWarnings(as.Date(y2, format = "%d-%m-%Y"))
+        if (!is.na(d)) return(d)
+      }
+    }
+
+    month_re <- paste(names(month_map), collapse = "|")
+    mloc <- stringr::str_locate(s, month_re)
+    if (is.na(mloc[1])) return(as.Date(NA))
+
+    month_txt <- stringr::str_sub(s, mloc[1], mloc[2])
+    month_num <- month_map[[month_txt]]
+    if (is.null(month_num) || is.na(month_num)) return(as.Date(NA))
+
+    prefix <- stringr::str_sub(s, max(1, mloc[1] - 30), mloc[1] - 1)
+    day_txt <- stringr::str_extract(prefix, "\\d{1,2}")
+    day_num <- suppressWarnings(as.integer(day_txt))
+    if (is.na(day_num)) return(as.Date(NA))
+
+    suffix <- stringr::str_sub(s, mloc[2] + 1)
+    year_txt <- stringr::str_extract(suffix, "\\d{4}")
+    if (is.na(year_txt)) year_txt <- stringr::str_extract(s, "\\d{4}")
+    year_num <- suppressWarnings(as.integer(year_txt))
+    if (is.na(year_num)) return(as.Date(NA))
+
+    suppressWarnings(as.Date(sprintf("%04d-%02d-%02d", year_num, month_num, day_num)))
+  }
+
+  as.Date(vapply(x, parse_one, FUN.VALUE = as.Date(NA)))
 }
 
 is_document_url <- function(url) {
@@ -320,6 +363,7 @@ follow_relevant_links <- function(seed_links, include_pattern, exclude_pattern =
 
   dplyr::distinct(discovered, .data$url, .keep_all = TRUE)
 }
+
 
 safe_url_basename <- function(url) {
   if (is.na(url) || url == "") return(NA_character_)
