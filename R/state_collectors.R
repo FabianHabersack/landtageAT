@@ -240,58 +240,82 @@ collect_vbg_protocols <- function(max_pages = 250, max_results = NULL) {
 
 collect_tir_protocols <- function() {
   base_url <- "https://lte.tirol.gv.at/public/sitzung/landtag/landtagsSitzungList.xhtml?cid=1"
-  cookie_file <- tempfile(fileext = ".cookies")
-  first <- tryCatch(
-    httr2::request(base_url) |>
-      httr2::req_user_agent("landtageAT/0.2.0") |>
-      httr2::req_timeout(30) |>
-      httr2::req_cookie_preserve(cookie_file) |>
-      httr2::req_perform(),
-    error = function(e) NULL
-  )
-  if (is.null(first)) return(links_to_protocols(empty_links_tbl(), "tir", base_url, backend = "tir"))
 
-  start_doc <- xml2::read_html(httr2::resp_body_string(first))
-  view_state <- rvest::html_attr(rvest::html_element(start_doc, "input[name='jakarta.faces.ViewState']"), "value")
-  token <- rvest::html_attr(rvest::html_element(start_doc, "input[name='token']"), "value")
+  fetch_session_page <- function(from_date = NULL, to_date = NULL) {
+    cookie_file <- tempfile(fileext = ".cookies")
+    first <- tryCatch(
+      httr2::request(base_url) |>
+        httr2::req_user_agent("landtageAT/0.2.0") |>
+        httr2::req_timeout(30) |>
+        httr2::req_cookie_preserve(cookie_file) |>
+        httr2::req_perform(),
+      error = function(e) NULL
+    )
+    if (is.null(first)) return(list(links = empty_links_tbl(), total = 0L))
 
-  if (is.na(view_state) || is.na(token) || view_state == "" || token == "") {
-    return(links_to_protocols(empty_links_tbl(), "tir", base_url, backend = "tir"))
+    start_doc <- xml2::read_html(httr2::resp_body_string(first))
+    view_state <- rvest::html_attr(rvest::html_element(start_doc, "input[name='jakarta.faces.ViewState']"), "value")
+    token <- rvest::html_attr(rvest::html_element(start_doc, "input[name='token']"), "value")
+    if (is.na(view_state) || is.na(token) || view_state == "" || token == "") {
+      return(list(links = empty_links_tbl(), total = 0L))
+    }
+
+    from_txt <- if (is.null(from_date)) "" else format(from_date, "%d.%m.%Y")
+    to_txt <- if (is.null(to_date)) "" else format(to_date, "%d.%m.%Y")
+
+    search_resp <- tryCatch(
+      httr2::request(base_url) |>
+        httr2::req_user_agent("landtageAT/0.2.0") |>
+        httr2::req_timeout(30) |>
+        httr2::req_cookie_preserve(cookie_file) |>
+        httr2::req_body_form(
+          "listContent:j_id_3n:entityComplete_input" = "",
+          "listContent:j_id_3n:entityComplete_hinput" = "",
+          "listContent:j_id_3q:menu_input" = "",
+          "listContent:j_id_3x_input" = from_txt,
+          "listContent:j_id_3y_input" = to_txt,
+          "listContent:j_id_3z_input" = "",
+          "listContent:j_id_44_9" = "listContent:j_id_44_9",
+          "token" = token,
+          "listContent:fid_SUBMIT" = "1",
+          "jakarta.faces.ViewState" = view_state
+        ) |>
+        httr2::req_perform(),
+      error = function(e) NULL
+    )
+    if (is.null(search_resp)) return(list(links = empty_links_tbl(), total = 0L))
+
+    result_doc <- xml2::read_html(httr2::resp_body_string(search_resp))
+    links <- tibble::tibble(
+      text = rvest::html_text2(rvest::html_elements(result_doc, xpath = "//*[@id='listContent:resultForm:resultTable_data']//a[@href]")),
+      href = rvest::html_attr(rvest::html_elements(result_doc, xpath = "//*[@id='listContent:resultForm:resultTable_data']//a[@href]"), "href")
+    ) |>
+      dplyr::mutate(url = xml2::url_absolute(.data$href, base_url)) |>
+      dplyr::filter(
+        stringr::str_detect(.data$url, "landtagsSitzungStamm\\.xhtml\\?id="),
+        !is.na(.data$url)
+      ) |>
+      dplyr::distinct(.data$url, .keep_all = TRUE)
+
+    page_info <- rvest::html_text2(rvest::html_element(result_doc, "span.ui-paginator-current"))
+    total <- suppressWarnings(as.integer(stringr::str_match(page_info, "von\\s+(\\d+)")[, 2]))
+    if (is.na(total)) total <- nrow(links)
+
+    list(links = links, total = total)
   }
 
-  search_resp <- tryCatch(
-    httr2::request(base_url) |>
-      httr2::req_user_agent("landtageAT/0.2.0") |>
-      httr2::req_timeout(30) |>
-      httr2::req_cookie_preserve(cookie_file) |>
-      httr2::req_body_form(
-        "listContent:j_id_3n:entityComplete_input" = "",
-        "listContent:j_id_3n:entityComplete_hinput" = "",
-        "listContent:j_id_3q:menu_input" = "",
-        "listContent:j_id_3x_input" = "",
-        "listContent:j_id_3y_input" = "",
-        "listContent:j_id_3z_input" = "",
-        "listContent:j_id_44_9" = "listContent:j_id_44_9",
-        "token" = token,
-        "listContent:fid_SUBMIT" = "1",
-        "jakarta.faces.ViewState" = view_state
-      ) |>
-      httr2::req_perform(),
-    error = function(e) NULL
-  )
-  if (is.null(search_resp)) return(links_to_protocols(empty_links_tbl(), "tir", base_url, backend = "tir"))
-
-  result_doc <- xml2::read_html(httr2::resp_body_string(search_resp))
-  session_links <- tibble::tibble(
-    text = rvest::html_text2(rvest::html_elements(result_doc, xpath = "//*[@id='listContent:resultForm:resultTable_data']//a[@href]")),
-    href = rvest::html_attr(rvest::html_elements(result_doc, xpath = "//*[@id='listContent:resultForm:resultTable_data']//a[@href]"), "href")
-  ) |>
-    dplyr::mutate(url = xml2::url_absolute(.data$href, base_url)) |>
-    dplyr::filter(
-      stringr::str_detect(.data$url, "landtagsSitzungStamm\\.xhtml\\?id="),
-      !is.na(.data$url)
-    ) |>
-    dplyr::distinct(.data$url, .keep_all = TRUE)
+  years <- seq.int(as.integer(format(Sys.Date(), "%Y")), 2010L, by = -1L)
+  session_links <- purrr::map_dfr(years, function(y) {
+    from_date <- as.Date(sprintf("%04d-01-01", y))
+    to_date <- as.Date(sprintf("%04d-12-31", y))
+    page <- fetch_session_page(from_date, to_date)
+    page$links
+  }) |>
+    dplyr::distinct(.data$url, .keep_all = TRUE) |>
+    dplyr::mutate(session_date = infer_date(.data$text)) |>
+    dplyr::arrange(dplyr::desc(.data$session_date), dplyr::desc(.data$url)) |>
+    dplyr::slice_head(n = 30) |>
+    dplyr::select(-"session_date")
 
   if (nrow(session_links) == 0) return(links_to_protocols(empty_links_tbl(), "tir", base_url, backend = "tir"))
 

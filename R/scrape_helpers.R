@@ -194,7 +194,7 @@ enrich_with_elections <- function(protocols) {
     has_match <- !is.na(idx) & idx > 0
     idx_safe <- pmax(idx, 1)
 
-    df_state |>
+    out_state <- df_state |>
       dplyr::mutate(
         legislative_period = dplyr::if_else(has_match, e$legislative_period[idx_safe], NA_character_),
         election_id = dplyr::if_else(has_match, e$election_id[idx_safe], NA_character_),
@@ -205,6 +205,26 @@ enrich_with_elections <- function(protocols) {
         election_valid = dplyr::if_else(has_match, e$election_valid[idx_safe], NA_real_),
         election_invalid = dplyr::if_else(has_match, e$election_invalid[idx_safe], NA_real_)
       )
+
+    state_party_cols <- setdiff(
+      names(e),
+      c("state", "election_id", "election_name", "election_date", "election_eligible", "election_votes", "election_valid", "election_invalid", "legislative_period")
+    )
+    matched_rows <- unique(idx_safe[has_match])
+    if (length(matched_rows) == 0) matched_rows <- integer()
+    state_party_cols <- state_party_cols[
+      vapply(state_party_cols, function(pid) {
+        vals <- suppressWarnings(as.numeric(e[[pid]][matched_rows]))
+        any(!is.na(vals) & vals > 0, na.rm = TRUE)
+      }, FUN.VALUE = logical(1))
+    ]
+
+    for (pid in state_party_cols) {
+      vals <- suppressWarnings(as.numeric(e[[pid]][idx_safe]))
+      out_state[[pid]] <- dplyr::if_else(has_match, vals, NA_real_)
+    }
+
+    out_state
   })
 
   out <- dplyr::bind_rows(enriched)
@@ -223,15 +243,23 @@ enrich_with_elections <- function(protocols) {
   }
 
   party_source_cols <- setdiff(
-    names(elections),
-    c("state", "election_id", "election_name", "election_date", "election_eligible", "election_votes", "election_valid", "election_invalid", "legislative_period")
+    names(out),
+    c("state", "state_name", "session_id", "session_date", "title", "legislative_period", "protocol_url", "document_type", "source_url", "backend", "scraped_at", "election_id", "election_name", "election_date", "election_eligible", "election_votes", "election_valid", "election_invalid")
   )
   if (length(party_source_cols) == 0) return(out)
 
   for (pid in party_source_cols) {
     col <- party_name(pid)
-    out[[col]] <- if (pid %in% names(out)) suppressWarnings(as.numeric(out[[pid]])) else NA_real_
-    if (pid != col && pid %in% names(out)) out[[pid]] <- NULL
+    vals <- suppressWarnings(as.numeric(out[[pid]]))
+    if (col %in% names(out) && col != pid) {
+      out[[col]] <- dplyr::coalesce(out[[col]], vals)
+      out[[pid]] <- NULL
+    } else if (col != pid) {
+      out[[col]] <- vals
+      out[[pid]] <- NULL
+    } else {
+      out[[pid]] <- vals
+    }
   }
 
   out
