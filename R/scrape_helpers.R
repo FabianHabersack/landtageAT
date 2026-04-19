@@ -288,6 +288,13 @@ infer_date <- function(x) {
   )
 
   parse_one <- function(txt) {
+    safe_date <- function(value, fmt = NULL) {
+      tryCatch(
+        if (is.null(fmt)) as.Date(value) else as.Date(value, format = fmt),
+        error = function(e) as.Date(NA)
+      )
+    }
+
     s <- tolower(iconv(null_or(txt, ""), from = "", to = "ASCII//TRANSLIT"))
     s <- gsub("([0-9])([[:alpha:]])", "\\1 \\2", s)
     s <- gsub("([[:alpha:]])([0-9])", "\\1 \\2", s)
@@ -297,38 +304,41 @@ infer_date <- function(x) {
     y <- stringr::str_extract(s, "\\d{4}-\\d{2}-\\d{2}|\\d{1,2}[\\.-]\\d{1,2}[\\.-]\\d{4}")
     if (!is.na(y)) {
       if (stringr::str_detect(y, "^\\d{4}-")) {
-        d <- suppressWarnings(as.Date(y))
-        if (!is.na(d)) return(d)
+        d <- suppressWarnings(safe_date(y))
+        if (!is.na(d)) return(format(d, "%Y-%m-%d"))
       } else {
         y2 <- gsub("\\.", "-", y)
-        d <- suppressWarnings(as.Date(y2, format = "%d-%m-%Y"))
-        if (!is.na(d)) return(d)
+        d <- suppressWarnings(safe_date(y2, fmt = "%d-%m-%Y"))
+        if (!is.na(d)) return(format(d, "%Y-%m-%d"))
       }
     }
 
     month_re <- paste(names(month_map), collapse = "|")
     mloc <- stringr::str_locate(s, month_re)
-    if (is.na(mloc[1])) return(as.Date(NA))
+    if (is.na(mloc[1])) return(NA_character_)
 
     month_txt <- stringr::str_sub(s, mloc[1], mloc[2])
     month_num <- month_map[[month_txt]]
-    if (is.null(month_num) || is.na(month_num)) return(as.Date(NA))
+    if (is.null(month_num) || is.na(month_num)) return(NA_character_)
 
     prefix <- stringr::str_sub(s, max(1, mloc[1] - 30), mloc[1] - 1)
     day_txt <- stringr::str_extract(prefix, "\\d{1,2}")
     day_num <- suppressWarnings(as.integer(day_txt))
-    if (is.na(day_num)) return(as.Date(NA))
+    if (is.na(day_num)) return(NA_character_)
 
     suffix <- stringr::str_sub(s, mloc[2] + 1)
     year_txt <- stringr::str_extract(suffix, "\\d{4}")
     if (is.na(year_txt)) year_txt <- stringr::str_extract(s, "\\d{4}")
     year_num <- suppressWarnings(as.integer(year_txt))
-    if (is.na(year_num)) return(as.Date(NA))
+    if (is.na(year_num)) return(NA_character_)
 
-    suppressWarnings(as.Date(sprintf("%04d-%02d-%02d", year_num, month_num, day_num)))
+    out <- suppressWarnings(safe_date(sprintf("%04d-%02d-%02d", year_num, month_num, day_num)))
+    if (is.na(out)) return(NA_character_)
+    format(out, "%Y-%m-%d")
   }
 
-  as.Date(vapply(x, parse_one, FUN.VALUE = as.Date(NA)))
+  parsed <- vapply(x, parse_one, FUN.VALUE = character(1))
+  as.Date(parsed)
 }
 
 is_document_url <- function(url) {
