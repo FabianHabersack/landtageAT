@@ -2,7 +2,7 @@
 
 <img src="man/figures/landtageAT.png" align="right" height="180" alt="landtageAT logo" />
 
-`landtageAT` provides a unified R interface to parliamentary data from Austria's nine state parliaments (Landtage), while using a specific webcrawling and scraping-based logic under the hood. The package not only provides data access but also additional functionality for data analysis and is intended as a swiss army knife for researchers and data journalists interested in parliamentarism and regional politics in Austria.
+`landtageAT` provides a unified R interface to parliamentary data from Austria's nine state parliaments (Landtage), using webscraping and crawling under the hood. The package not only provides data access but also additional functionality for data analysis and is intended as a swiss army knife for researchers and data journalists interested in parliamentarism and regional politics in Austria.
 
 ## What version 0.2.0 supports
 
