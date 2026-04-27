@@ -2,12 +2,12 @@
 
 <img src="man/figures/landtageAT.png" align="right" height="180" alt="landtageAT logo" />
 
-`landtageAT` provides a unified R interface to parliamentary data from Austria's nine state parliaments (Landtage), using webscraping and crawling under the hood. The package not only provides data access but also additional functionality for data analysis and is intended as a swiss army knife for researchers and data journalists interested in parliamentarism and regional politics in Austria.
+`landtageAT` provides a unified R interface to parliamentary data from Austria's nine state parliaments (Landtage). The package not only provides data access through web scraping but also additional functionality for data analysis and is intended as a swiss army knife for researchers and data journalists interested in parliamentarism and regional politics in Austria.
 
-## What version 0.2.0 supports
+## What the current version (v0.2.0) supports:
 
 - listing states and backend feature coverage,
-- discovering plenary session/protocol links with a harmonized schema (including `legislative_period`),
+- listing plenary session and protocol links with harmonized metadata (e.g., `legislative_period`),
 - downloading and extracting text from protocol files,
 - provenance fields (`source_url`, `backend`, `scraped_at`) on outputs,
 - graceful degradation when a state endpoint is unavailable (e.g., temporary 503),
@@ -41,9 +41,9 @@ txt <- extract_protocol_text(files$file_path[[1]])
 
 ## Notes on heterogeneity
 
-State systems differ strongly in structure and data scope. `landtageAT` standardizes the user-facing interface, but does not pretend every state exposes the same level of detail. Member-level and speech-level extraction remain planned extension points and are explicitly marked as such.
+State systems differ strongly in structure and data scope. The package `landtageAT` standardizes the user-facing interface, while being mindful that not every state exposes the same level of detail. MP-level and speech-level data extraction remain planned extensions and are explicitly marked as such.
 
-## Discovery entry points used
+## Entry points used for each state
 
 - Burgenland: https://www.bgld-landtag.at/landtagssitzungen/protokolle/xxiii-gp-protokolle
 - Kärnten: https://www.ktn.gv.at/Politik/Landtag/Stenographische-Protokolle
