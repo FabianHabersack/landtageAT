@@ -9,8 +9,6 @@
 - listing states and backend feature coverage,
 - listing plenary session and protocol links with harmonized metadata (e.g., `legislative_period`),
 - downloading and extracting text from protocol files,
-- provenance fields (`source_url`, `backend`, `scraped_at`) on outputs,
-- graceful degradation when a state endpoint is unavailable (e.g., temporary 503),
 - enriching parliamentary data with data on state elections obtained from wahldatenbank.
 
 ## Installation
